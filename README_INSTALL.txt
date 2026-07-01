@@ -47,3 +47,9 @@ CATATAN KEAMANAN
 - Ubah password owner setelah instalasi.
 - Jangan expose token plain di screenshot/log publik.
 - Hapus/rename folder install setelah produksi bila sudah stabil.
+
+INSTALL LOCK
+- Setelah instalasi berhasil, installer otomatis membuat `storage/install.lock`.
+- Jika Back Office sudah terlanjur di-install tanpa lock, buka sekali `/tools/create_install_lock.php`, lalu hapus file tersebut.
+- Untuk reinstall, hapus manual `storage/install.lock`.
+- Folder `.git` tidak disertakan pada paket fixed demi keamanan deployment.
