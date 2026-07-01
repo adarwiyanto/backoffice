@@ -1,0 +1,3 @@
+<?php
+$token = $_GET['token'] ?? '';
+?><!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Token Hash Generator</title><link rel="stylesheet" href="assets/css/backoffice.css"></head><body class="login-body"><div class="login-card"><h2>SHA256 Token Generator</h2><form><label>Token Plain</label><input name="token" value="<?=htmlspecialchars($token)?>"><button class="btn primary">Generate</button></form><?php if($token): ?><label>SHA256 Hash</label><textarea rows="4" readonly><?=hash('sha256',$token)?></textarea><?php endif; ?><p class="muted">Gunakan hash ini di tabel API Adena/Dapur. Token plain-nya dimasukkan ke Back Office.</p></div></body></html>

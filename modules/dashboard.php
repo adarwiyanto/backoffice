@@ -1,0 +1,10 @@
+<?php $adena=bo_api_request('adena','api/backoffice/dashboard_summary.php'); $dapur=bo_api_request('dapur','api/backoffice/dashboard_summary.php'); $ad=$adena['data']??[]; $dp=$dapur['data']??[]; ?>
+<div class="page-title"><div><h1>Dashboard</h1><div class="muted">Ringkasan toko dan dapur via API.</div></div><a class="btn primary" href="?p=integration">Cek Integrasi</a></div>
+<div class="grid">
+  <div class="card metric"><div class="label">Omset Toko Hari Ini</div><div class="value"><?=money_id($ad['sales_today']??0)?></div><div class="sub"><?=e($ad['transactions_today']??0)?> transaksi</div></div>
+  <div class="card metric"><div class="label">Omset Bulan Ini</div><div class="value"><?=money_id($ad['sales_month']??0)?></div><div class="sub">Adena / Toko</div></div>
+  <div class="card metric"><div class="label">Produksi Hari Ini</div><div class="value"><?=e($dp['productions_today']??0)?></div><div class="sub">Posting produksi dapur</div></div>
+  <div class="card metric"><div class="label">Distribusi Pending</div><div class="value"><?=e($dp['pending_distributions']??0)?></div><div class="sub">Dapur ke toko</div></div>
+</div>
+<div class="grid section"><div class="card metric"><div class="label">Produk Toko</div><div class="value"><?=e($ad['active_products']??0)?></div></div><div class="card metric"><div class="label">Produk Jadi Dapur</div><div class="value"><?=e($dp['active_finished_products']??0)?></div></div><div class="card metric"><div class="label">Pegawai Toko</div><div class="value"><?=e($ad['employees_count']??0)?></div></div><div class="card metric"><div class="label">Pegawai Dapur</div><div class="value"><?=e($dp['employees_count']??0)?></div></div></div>
+<div class="grid-2 section"><div class="card"><h3>Status Adena</h3><p class="muted"><?=e($adena['message']??'')?></p><span class="badge <?=($adena['ok']??false)?'ok':'danger'?>"><?=($adena['ok']??false)?'OK':'GAGAL'?></span></div><div class="card"><h3>Status Dapur</h3><p class="muted"><?=e($dapur['message']??'')?></p><span class="badge <?=($dapur['ok']??false)?'ok':'danger'?>"><?=($dapur['ok']??false)?'OK':'GAGAL'?></span></div></div>

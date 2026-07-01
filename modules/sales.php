@@ -1,0 +1,1 @@
+<div class="page-title"><div><h1><?=ucfirst('sales')?></h1><div class="muted">Modul ini sudah disiapkan sebagai kerangka read-only PATCH 1. Aksi edit/posting/approve belum diaktifkan.</div></div></div><div class="card"><p>Halaman sales siap dikembangkan pada patch berikutnya setelah koneksi API stabil.</p></div>

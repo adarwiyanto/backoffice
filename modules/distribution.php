@@ -1,0 +1,1 @@
+<div class="page-title"><div><h1><?=ucfirst('distribution')?></h1><div class="muted">Modul ini sudah disiapkan sebagai kerangka read-only PATCH 1. Aksi edit/posting/approve belum diaktifkan.</div></div></div><div class="card"><p>Halaman distribution siap dikembangkan pada patch berikutnya setelah koneksi API stabil.</p></div>
