@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS bo_pairing_requests (
   request_secret TEXT NULL,
   requester_name VARCHAR(160) NOT NULL DEFAULT 'Back Office',
   requester_type VARCHAR(50) NOT NULL DEFAULT 'backoffice',
-  requested_scope VARCHAR(80) NOT NULL DEFAULT 'superadmin',
+  requested_scope VARCHAR(80) NOT NULL DEFAULT 'admin_rw',
   status VARCHAR(30) NOT NULL DEFAULT 'pending',
   access_token TEXT NULL,
   message TEXT NULL,
