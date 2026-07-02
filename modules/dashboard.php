@@ -248,6 +248,7 @@ function bo_dash_dapur_branch(array $data, array $conn): array {
     ]),
     'active_finished_products'=>bo_dash_value($data,['active_finished_products','finished_products_count','finished_product_count','active_products','produk_jadi_aktif','jumlah_produk_jadi_aktif']),
     'employees_count'=>bo_dash_value($data,['employees_count','employee_count','active_employees','pegawai_count','jumlah_pegawai','staff_count']),
+    'kitchen_revenue_month'=>bo_dash_value($data,['kitchen_revenue_month','dapur_omset_month','omset_dapur_bulan_ini','dapur_revenue_month','omset_dapur_month']),
   ];
 }
 
@@ -285,7 +286,7 @@ function bo_dash_adena_summary(): array {
 }
 
 function bo_dash_dapur_summary(): array {
-  $sum=['productions_today'=>0,'pending_distributions'=>0,'active_finished_products'=>0,'employees_count'=>0,'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
+  $sum=['productions_today'=>0,'pending_distributions'=>0,'active_finished_products'=>0,'employees_count'=>0,'kitchen_revenue_month'=>0,'revenue_branches'=>[],'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
   foreach(bo_connections_by_type('dapur') as $conn){
     $sum['total_count']++;
     $res=bo_dash_fetch_summary_payload($conn,'dapur');
@@ -301,9 +302,24 @@ function bo_dash_dapur_summary(): array {
       $sum['pending_distributions'] += $b['pending_distributions'];
       $sum['active_finished_products'] += $b['active_finished_products'];
       $sum['employees_count'] += $b['employees_count'];
+      $sum['kitchen_revenue_month'] += (float)($b['kitchen_revenue_month'] ?? 0);
     }
+    $revRows=bo_dash_kitchen_revenue_rows($data);
+    foreach($revRows as $rr){ $sum['revenue_branches'][]=$rr; }
   }
   return $sum;
+}
+
+function bo_dash_kitchen_revenue_rows(array $data): array {
+  $keys=['kitchen_revenue_branches','dapur_revenue_branches','omset_dapur_branches','dapur_omset_branches','stores'];
+  foreach($data as $k=>$v){
+    if(is_array($v) && in_array(bo_dash_norm_key((string)$k),array_map('bo_dash_norm_key',$keys),true)){
+      $rows=[]; foreach($v as $row){ if(is_array($row)){ $rows[]=['name'=>(string)($row['name']??$row['store_name']??$row['branch_name']??'Toko'),'kitchen_revenue_month'=>bo_dash_value($row,['kitchen_revenue_month','dapur_omset_month','omset_dapur_bulan_ini','total_amount','revenue_month'])]; } }
+      if($rows) return $rows;
+    }
+  }
+  foreach($data as $v){ if(is_array($v)){ $rows=bo_dash_kitchen_revenue_rows($v); if($rows) return $rows; } }
+  return [];
 }
 
 function bo_dash_money_lines(array $branches, string $field): string {
@@ -334,6 +350,7 @@ $dp=bo_dash_dapur_summary();
 <div class="grid">
   <div class="card metric"><div class="label">Omset Toko Hari Ini</div><div class="value"><?=money_id($ad['sales_today']??0)?></div><div class="sub"><?=e((int)($ad['transactions_today']??0))?> transaksi total</div><div class="dash-breakdown"><?=bo_dash_money_lines($ad['branches']??[],'sales_today')?></div></div>
   <div class="card metric"><div class="label">Omset Total Bulan Ini</div><div class="value"><?=money_id($ad['sales_month']??0)?></div><div class="sub">Total toko terkoneksi</div><div class="dash-breakdown"><?=bo_dash_money_lines($ad['branches']??[],'sales_month')?></div></div>
+  <div class="card metric"><div class="label">Omset Dapur Bulan Ini</div><div class="value"><?=money_id($dp['kitchen_revenue_month']??0)?></div><div class="sub">Harga jual Dapur aktual</div><div class="dash-breakdown"><?=bo_dash_money_lines($dp['revenue_branches']??[],'kitchen_revenue_month')?></div></div>
   <div class="card metric"><div class="label">Produksi Hari Ini</div><div class="value"><?=e((int)($dp['productions_today']??0))?></div><div class="sub">Posting produksi dapur</div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'productions_today')?></div></div>
   <div class="card metric"><div class="label">Distribusi Pending</div><div class="value"><?=e((int)($dp['pending_distributions']??0))?></div><div class="sub">Dapur ke toko</div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'pending_distributions')?></div></div>
 </div>
