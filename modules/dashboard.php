@@ -2,7 +2,11 @@
 require_once __DIR__.'/../core/ApiClient.php';
 
 function bo_dash_norm_key(string $key): string {
-  return strtolower(preg_replace('~[^a-z0-9]+~i','_',trim($key)));
+  $key=trim($key);
+  $key=preg_replace('~([a-z0-9])([A-Z])~','$1_$2',$key);
+  $key=preg_replace('~([A-Z]+)([A-Z][a-z])~','$1_$2',$key);
+  $key=strtolower(preg_replace('~[^a-z0-9]+~i','_',$key));
+  return trim($key,'_');
 }
 
 function bo_dash_num($value): float {
@@ -71,6 +75,68 @@ function bo_dash_context_value(array $data, array $contexts, array $keys): float
   return 0;
 }
 
+
+function bo_dash_nested_value(array $data, array $parents, array $children): float {
+  $parentMap=[]; foreach($parents as $p) $parentMap[bo_dash_norm_key($p)]=true;
+  $childMap=[]; foreach($children as $c) $childMap[bo_dash_norm_key($c)]=true;
+  foreach($data as $k=>$v){
+    $nk=bo_dash_norm_key((string)$k);
+    if(is_array($v) && isset($parentMap[$nk])){
+      foreach($v as $ck=>$cv){
+        if(!is_array($cv) && isset($childMap[bo_dash_norm_key((string)$ck)])){
+          $num=bo_dash_num($cv);
+          if($num>0) return $num;
+        }
+      }
+      $val=bo_dash_value($v,$children);
+      if($val>0) return $val;
+    }
+  }
+  foreach($data as $v){
+    if(is_array($v)){
+      $val=bo_dash_nested_value($v,$parents,$children);
+      if($val>0) return $val;
+    }
+  }
+  return 0;
+}
+
+function bo_dash_deep_merge(array $base, array $add): array {
+  foreach($add as $k=>$v){
+    if(is_array($v)){
+      $base[$k]=isset($base[$k]) && is_array($base[$k]) ? bo_dash_deep_merge($base[$k],$v) : $v;
+      continue;
+    }
+    if(!array_key_exists($k,$base) || $base[$k]===null || $base[$k]==='' || (is_numeric($base[$k]) && (float)$base[$k]===0.0 && bo_dash_num($v)>0)){
+      $base[$k]=$v;
+    }
+  }
+  return $base;
+}
+
+function bo_dash_has_scalar_data(array $data): bool {
+  foreach($data as $v){
+    if(is_array($v)){ if(bo_dash_has_scalar_data($v)) return true; }
+    elseif($v!==null && $v!=='') return true;
+  }
+  return false;
+}
+
+function bo_dash_fetch_summary_payload(array $conn, string $kind): array {
+  $merged=[]; $ok=false; $errors=[]; $attempts=[];
+  foreach(bo_dash_summary_endpoints() as $endpoint){
+    $res=bo_api_request_connection($conn,$endpoint);
+    $attempts[]=['endpoint'=>$endpoint,'ok'=>!empty($res['ok']),'status_code'=>$res['status_code']??($res['_http_code']??0),'message'=>$res['message']??''];
+    if(empty($res['ok'])){ $errors[]=$res['message'] ?? ('Endpoint gagal: '.$endpoint); continue; }
+    $ok=true;
+    $payload=bo_dash_payload($res);
+    if(is_array($payload) && bo_dash_has_scalar_data($payload)) $merged=bo_dash_deep_merge($merged,$payload);
+    if($kind==='adena' && bo_dash_month_amount($merged)>0 && (bo_dash_today_amount($merged,bo_dash_transactions_today($merged))>0 || bo_dash_transactions_today($merged)>0)) break;
+    if($kind==='dapur' && (bo_dash_value($merged,['productions_today','production_today','produksi_hari_ini','today_production_count'])>0 || bo_dash_value($merged,['pending_distributions','distribution_pending','pending_delivery_count','distribusi_pending'])>0)) break;
+  }
+  return ['ok'=>$ok,'data'=>$merged,'message'=>$ok?'':($errors[0] ?? 'API dashboard gagal'),'_attempts'=>$attempts];
+}
+
 function bo_dash_label(array $data, array $conn): string {
   $found=bo_dash_find_key($data,['branch_name','store_name','outlet_name','cabang_name','nama_cabang','nama_toko','shop_name','name','system_name']);
   $label=$found ? trim((string)$found['value']) : '';
@@ -123,17 +189,27 @@ function bo_dash_today_amount(array $data, float $trxToday): float {
 function bo_dash_month_amount(array $data): float {
   $amountKeys=[
     'omset_month','omzet_month','omset_bulan_ini','omzet_bulan_ini','total_omset_month','total_omzet_month','total_omset_bulan_ini','total_omzet_bulan_ini',
-    'revenue_month','monthly_revenue','month_revenue','this_month_revenue','revenue_this_month','total_revenue_month','gross_revenue_month','net_revenue_month',
-    'gross_sales_month','net_sales_month','sales_amount_month','month_sales_amount','monthly_sales_amount','total_sales_amount_month',
-    'amount_month','month_amount','monthly_amount','total_amount_month','sales_month_total','total_sales_month','sales_this_month','month_sales','monthly_sales','total_sales_this_month'
+    'omset_this_month','omzet_this_month','this_month_omset','this_month_omzet','current_month_omset','current_month_omzet','mtd_omset','mtd_omzet',
+    'revenue_month','monthly_revenue','month_revenue','this_month_revenue','revenue_this_month','current_month_revenue','mtd_revenue','total_revenue_month','total_revenue_this_month','gross_revenue_month','net_revenue_month',
+    'gross_sales_month','net_sales_month','sales_amount_month','month_sales_amount','monthly_sales_amount','this_month_sales_amount','sales_amount_this_month','total_sales_amount_month',
+    'amount_month','month_amount','monthly_amount','amount_this_month','this_month_amount','total_amount_month','total_amount_this_month',
+    'sales_month_total','total_sales_month','sales_this_month','month_sales','monthly_sales','total_sales_this_month','sales_month','penjualan_bulan_ini','total_penjualan_bulan_ini',
+    'totalOmsetBulanIni','omsetBulanIni','omzetBulanIni','salesThisMonth','totalSalesThisMonth','monthlySales','monthlyRevenue','monthRevenue'
   ];
   $v=bo_dash_value($data,$amountKeys);
   if($v>0) return $v;
-  $ctx=bo_dash_context_value($data,['month','monthly','this_month','bulan_ini'],['omset','omzet','revenue','gross_revenue','net_revenue','sales_amount','amount','total_amount','total_sales','sales_total','gross_sales','net_sales']);
+
+  $monthContexts=['month','monthly','this_month','bulan_ini','current_month','mtd','month_to_date','periode_bulan_ini'];
+  $amountChildren=['omset','omzet','revenue','gross_revenue','net_revenue','sales_amount','amount','total_amount','total_sales','sales_total','gross_sales','net_sales','sales','penjualan','nominal','value','total'];
+  $ctx=bo_dash_context_value($data,$monthContexts,$amountChildren);
   if($ctx>0) return $ctx;
-  $sales=bo_dash_find_key($data,['sales_month','penjualan_bulan_ini']);
-  $sv=$sales ? bo_dash_num($sales['value']) : 0;
-  return $sv>=1000 ? $sv : 0;
+
+  $amountParents=['omset','omzet','revenue','sales','penjualan','total_sales','sales_total','gross_sales','net_sales','sales_amount','amount','total_amount','income','turnover'];
+  $monthChildren=['month','monthly','this_month','bulan_ini','current_month','mtd','month_to_date','total_month','total_this_month','value_month','amount_month'];
+  $nested=bo_dash_nested_value($data,$amountParents,$monthChildren);
+  if($nested>0) return $nested;
+
+  return 0;
 }
 
 function bo_dash_transactions_today(array $data): float {
@@ -189,7 +265,7 @@ function bo_dash_adena_summary(): array {
   $sum=['sales_today'=>0,'transactions_today'=>0,'sales_month'=>0,'active_products'=>0,'employees_count'=>0,'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
   foreach(bo_connections_by_type('adena') as $conn){
     $sum['total_count']++;
-    $res=function_exists('bo_api_request_connection_any') ? bo_api_request_connection_any($conn,bo_dash_summary_endpoints()) : bo_api_request_connection($conn,'api/backoffice/dashboard_summary.php');
+    $res=bo_dash_fetch_summary_payload($conn,'adena');
     if(!empty($res['ok'])) $sum['ok_count']++;
     else $sum['errors'][]=(string)($conn['system_name'] ?? $conn['system_key'] ?? 'Adena').': '.($res['message'] ?? 'API gagal');
     $data=bo_dash_payload($res);
@@ -212,7 +288,7 @@ function bo_dash_dapur_summary(): array {
   $sum=['productions_today'=>0,'pending_distributions'=>0,'active_finished_products'=>0,'employees_count'=>0,'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
   foreach(bo_connections_by_type('dapur') as $conn){
     $sum['total_count']++;
-    $res=function_exists('bo_api_request_connection_any') ? bo_api_request_connection_any($conn,bo_dash_summary_endpoints()) : bo_api_request_connection($conn,'api/backoffice/dashboard_summary.php');
+    $res=bo_dash_fetch_summary_payload($conn,'dapur');
     if(!empty($res['ok'])) $sum['ok_count']++;
     else $sum['errors'][]=(string)($conn['system_name'] ?? $conn['system_key'] ?? 'Dapur').': '.($res['message'] ?? 'API gagal');
     $data=bo_dash_payload($res);
