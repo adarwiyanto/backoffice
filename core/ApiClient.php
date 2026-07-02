@@ -54,6 +54,28 @@ function bo_api_request_connection(array $conn, string $endpoint, array $query=[
   $json['status_code']=$code; return $json;
 }
 
+
+function bo_api_request_connection_any(array $conn, array $endpoints, array $query=[]): array {
+  $attempts=[]; $first=null;
+  foreach($endpoints as $endpoint){
+    $endpoint=trim((string)$endpoint);
+    if($endpoint==='') continue;
+    $res=bo_api_request_connection($conn,$endpoint,$query);
+    $res['_endpoint']=$endpoint;
+    $attempts[]=['endpoint'=>$endpoint,'ok'=>!empty($res['ok']),'status_code'=>$res['status_code']??0,'message'=>$res['message']??''];
+    if($first===null) $first=$res;
+    $payload=$res['data'] ?? $res['summary'] ?? $res['dashboard'] ?? $res['payload'] ?? null;
+    $hasPayload=is_array($payload) && count($payload)>0;
+    if(!empty($res['ok']) && ($hasPayload || count($res)>2)){
+      $res['_attempts']=$attempts;
+      return $res;
+    }
+  }
+  $out=$first ?: ['ok'=>false,'message'=>'Tidak ada endpoint dashboard yang tersedia','data'=>null,'status_code'=>0];
+  $out['_attempts']=$attempts;
+  return $out;
+}
+
 function bo_log_sync(string $system,string $direction,string $endpoint,string $method,string $status,int $code,string $request,string $response): void {
   try{ bo_exec('INSERT INTO bo_sync_logs(system_key,direction,endpoint,method,status,status_code,request_payload,response_payload,created_at) VALUES(?,?,?,?,?,?,?,?,NOW())',[$system,$direction,$endpoint,$method,$status,$code,$request,$response]); }catch(Throwable $e){}
 }
