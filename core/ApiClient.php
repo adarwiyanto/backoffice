@@ -31,6 +31,11 @@ function bo_next_system_key(string $type): string {
 }
 
 function bo_api_token_from_conn(array $conn): string { return (string)($conn['api_token'] ?? $conn['access_token'] ?? ''); }
+function bo_redact_secret(string $text): string {
+  $text=preg_replace('/(Bearer\s+)[A-Za-z0-9._\-]+/i','$1[REDACTED]',$text);
+  $text=preg_replace('/(api[_-]?token|access[_-]?token|token_plain|authorization)(\"?\s*[:=]\s*\"?)[^\"\s,}]+/i','$1$2[REDACTED]',$text);
+  return $text;
+}
 
 function bo_api_request(string $systemKey, string $endpoint, array $query=[]): array {
   $conn=bo_connection($systemKey);
@@ -50,7 +55,7 @@ function bo_api_request_connection(array $conn, string $endpoint, array $query=[
   $body=curl_exec($ch); $err=curl_error($ch); $code=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE); curl_close($ch);
   if($body===false) { bo_log_sync($systemKey,'out',$endpoint,'GET','failed',$code,'',$err); return ['ok'=>false,'message'=>$err,'data'=>null,'status_code'=>$code]; }
   $json=json_decode($body,true); if(!is_array($json)) $json=['ok'=>false,'message'=>'Response bukan JSON','raw'=>$body];
-  bo_log_sync($systemKey,'out',$endpoint,'GET',($json['ok']??false)?'success':'failed',$code,'',$body);
+  bo_log_sync($systemKey,'out',$endpoint,'GET',($json['ok']??false)?'success':'failed',$code,'',bo_redact_secret((string)$body));
   $json['status_code']=$code; return $json;
 }
 
@@ -77,7 +82,7 @@ function bo_api_request_connection_any(array $conn, array $endpoints, array $que
 }
 
 function bo_log_sync(string $system,string $direction,string $endpoint,string $method,string $status,int $code,string $request,string $response): void {
-  try{ bo_exec('INSERT INTO bo_sync_logs(system_key,direction,endpoint,method,status,status_code,request_payload,response_payload,created_at) VALUES(?,?,?,?,?,?,?,?,NOW())',[$system,$direction,$endpoint,$method,$status,$code,$request,$response]); }catch(Throwable $e){}
+  try{ bo_exec('INSERT INTO bo_sync_logs(system_key,direction,endpoint,method,status,status_code,request_payload,response_payload,created_at) VALUES(?,?,?,?,?,?,?,?,NOW())',[$system,$direction,$endpoint,$method,$status,$code,bo_redact_secret($request),bo_redact_secret($response)]); }catch(Throwable $e){}
 }
 
 function bo_health_check(string $system): array {
