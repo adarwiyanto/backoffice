@@ -19,9 +19,21 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
  }
  if($act==='check_pairing'){
   $id=(int)($_POST['id']??0); $st=bo_exec('SELECT * FROM bo_pairing_requests WHERE id=?',[$id]); $r=$st->fetch();
-  if($r){ $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$r['request_secret']],'GET'); $status=$res['status']??($res['ok']?'pending':'failed'); bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$res['message']??'', $id]); if($status==='approved' && !empty($res['access_token'])){ bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,access_scope,status,is_active,paired_at,created_at) VALUES(?,?,?,?,?,?,?,1,NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),base_url=VALUES(base_url),api_token=VALUES(api_token),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),updated_at=NOW()',[$r['target_system'],$r['target_name'],$r['target_system'],$r['target_base_url'],$res['access_token'],$res['access_scope']??'admin_rw','active']); bo_exec('UPDATE bo_pairing_requests SET access_token=? WHERE id=?',[$res['access_token'],$id]); } $msg='Status pairing: '.$status; }
+  if($r){
+    $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$r['request_secret']],'GET');
+    $status=$res['status']??($res['ok']?'pending':'failed');
+    bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$res['message']??'', $id]);
+    if($status==='approved' && !empty($res['access_token'])){
+      $scope=$res['access_scope']??bo_scope_for_target($r['target_system']);
+      $existing=bo_exec('SELECT system_key FROM bo_system_connections WHERE base_url=? AND (system_type=? OR system_key=?) LIMIT 1',[$r['target_base_url'],$r['target_system'],$r['target_system']])->fetch();
+      $systemKey=$existing['system_key']??bo_next_system_key($r['target_system']);
+      bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,access_scope,status,is_active,paired_at,created_at) VALUES(?,?,?,?,?,?,?,1,NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),system_type=VALUES(system_type),base_url=VALUES(base_url),api_token=VALUES(api_token),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),updated_at=NOW()',[$systemKey,$r['target_name'],$r['target_system'],$r['target_base_url'],$res['access_token'],$scope,'active']);
+      bo_exec('UPDATE bo_pairing_requests SET access_token=? WHERE id=?',[$res['access_token'],$id]);
+    }
+    $msg='Status pairing: '.$status;
+  }
  }
- if($act==='health_check'){ foreach(['adena','dapur'] as $k) bo_health_check($k); $msg='Health check selesai.'; }
+ if($act==='health_check'){ foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn) bo_health_check_connection($conn); $msg='Health check selesai.'; }
 }
 $pairings=bo_exec('SELECT * FROM bo_pairing_requests ORDER BY id DESC LIMIT 100')->fetchAll();
 $conns=bo_exec('SELECT * FROM bo_system_connections ORDER BY system_key')->fetchAll();
