@@ -36,10 +36,14 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $name=trim($_POST['target_name']??ucfirst($target));
     $url=bo_normalize_url($_POST['target_base_url']??'');
     if($url==='') bo_integration_redirect('URL tujuan wajib diisi.','error','newPairModal');
-    $code=bo_pair_code(); $secret=bo_pair_secret(); $cfg=bo_config(); $boUrl=rtrim($cfg['app']['base_url']??'', '/');
-    $payload=['request_code'=>$code,'request_secret_hash'=>password_hash($secret,PASSWORD_DEFAULT),'requester_name'=>'Back Office','requester_type'=>'backoffice','requester_base_url'=>$boUrl,'target_type'=>$target,'callback_url'=>''];
+    $code=bo_pair_code(); $secret=bo_pair_secret(); $token=bo_pair_secret(); $cfg=bo_config(); $boUrl=rtrim($cfg['app']['base_url']??'', '/');
+    $secretHash=password_hash($secret,PASSWORD_DEFAULT);
+    $tokenHash=hash('sha256',$token);
+    $encryptedToken=bo_encrypt_secret($token);
+    if($encryptedToken==='' || bo_decrypt_secret($encryptedToken)!==$token) throw new RuntimeException('Token pairing gagal disimpan secara aman.');
+    $payload=['request_code'=>$code,'request_secret_hash'=>$secretHash,'access_token'=>$token,'access_token_hash'=>$tokenHash,'requester_name'=>'Back Office','requester_type'=>'backoffice','requester_base_url'=>$boUrl,'target_type'=>$target,'callback_url'=>''];
     $res=bo_remote_json($url,'api/pairing/request.php',$payload,'POST');
-    bo_exec('INSERT INTO bo_pairing_requests(target_system,target_name,target_base_url,request_code,request_secret,request_secret_hash,requester_name,requester_type,requested_scope,status,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NOW())',[$target,$name,$url,$code,bo_encrypt_secret($secret),password_hash($secret,PASSWORD_DEFAULT),'Back Office','backoffice',bo_scope_for_target($target),!empty($res['ok'])?'pending':'failed',$res['message']??'']);
+    bo_exec('INSERT INTO bo_pairing_requests(target_system,target_name,target_base_url,request_code,request_secret,request_secret_hash,requester_name,requester_type,requested_scope,status,access_token,access_token_hash,access_token_encrypted,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())',[$target,$name,$url,$code,bo_encrypt_secret($secret),$secretHash,'Back Office','backoffice',bo_scope_for_target($target),!empty($res['ok'])?'pending':'failed',null,$tokenHash,$encryptedToken,$res['message']??'']);
     bo_integration_redirect(!empty($res['ok'])?'Request pairing terkirim. Approve dari sistem tujuan.':'Request gagal: '.($res['message']??'error'),!empty($res['ok'])?'success':'error','pairingModal');
   }
 
@@ -54,39 +58,22 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 
     $token=bo_decrypt_secret((string)($r['access_token_encrypted']??''));
     $scope=(string)($r['requested_scope']??bo_scope_for_target((string)$r['target_system']));
-    $remoteMessage=(string)($r['message']??'');
-    $status=(string)($r['status']??'pending');
+    if($token==='' || !hash_equals((string)($r['access_token_hash']??''),hash('sha256',$token))){
+      $message='Credential pairing lokal tidak tersedia atau tidak valid. Buat request pairing baru.';
+      bo_exec("UPDATE bo_pairing_requests SET status='failed',message=?,updated_at=NOW() WHERE id=?",[$message,$id]);
+      if($isAuto){ header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>false,'done'=>false,'status'=>'failed','message'=>$message]); exit; }
+      bo_integration_redirect($message,'error','pairingModal');
+    }
 
-    if($token===''){
-      $secret=bo_decrypt_secret($r['request_secret'] ?? '');
-      if($secret==='') $secret=(string)($r['request_secret'] ?? '');
-      $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$secret],'GET');
-      $status=(string)($res['status']??(!empty($res['ok'])?'pending':'failed'));
-      $remoteMessage=(string)($res['message']??'');
-
-      if($status!=='approved'){
-        bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$remoteMessage,$id]);
-        if($isAuto){ header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>true,'done'=>false,'status'=>$status,'message'=>$remoteMessage]); exit; }
-        bo_integration_redirect('Status pairing: '.$status.'. '.$remoteMessage,$status==='pending'?'success':'error','pairingModal');
-      }
-
-      $token=trim((string)($res['access_token']??''));
-      $scope=(string)($res['access_scope']??bo_scope_for_target((string)$r['target_system']));
-      if($token===''){
-        $message='Approval diterima, tetapi access token tidak dikirim atau sudah pernah diambil. Buat pairing baru untuk koneksi ini.';
-        bo_exec("UPDATE bo_pairing_requests SET status='approved_token_missing',message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",[$message,$id]);
-        if($isAuto){ header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>false,'done'=>false,'status'=>'approved_token_missing','message'=>$message]); exit; }
-        bo_integration_redirect($message,'error','pairingModal');
-      }
-
-      $encryptedToken=bo_encrypt_secret($token);
-      if($encryptedToken==='' || !hash_equals($token,bo_decrypt_secret($encryptedToken))){
-        $message='Token diterima, tetapi gagal disimpan secara aman. Pairing belum difinalisasi.';
-        bo_exec("UPDATE bo_pairing_requests SET status='failed',message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",[$message,$id]);
-        if($isAuto){ header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>false,'done'=>false,'status'=>'failed','message'=>$message]); exit; }
-        bo_integration_redirect($message,'error','pairingModal');
-      }
-      bo_exec("UPDATE bo_pairing_requests SET status='approved_processing',message=?,access_token=NULL,access_token_hash=?,access_token_encrypted=?,requested_scope=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",['Approval diterima. Finalisasi koneksi otomatis sedang diproses.',hash('sha256',$token),$encryptedToken,$scope,$id]);
+    $secret=bo_decrypt_secret($r['request_secret'] ?? '');
+    if($secret==='') $secret=(string)($r['request_secret'] ?? '');
+    $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$secret],'GET');
+    $status=(string)($res['status']??(!empty($res['ok'])?'pending':'failed'));
+    $remoteMessage=(string)($res['message']??'');
+    if($status!=='approved'){
+      bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$remoteMessage,$id]);
+      if($isAuto){ header('Content-Type: application/json; charset=utf-8'); echo json_encode(['ok'=>true,'done'=>false,'status'=>$status,'message'=>$remoteMessage]); exit; }
+      bo_integration_redirect('Status pairing: '.$status.'. '.$remoteMessage,$status==='pending'?'success':'error','pairingModal');
     }
 
     $normalizedBase=bo_normalize_url((string)$r['target_base_url']);
@@ -96,7 +83,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       $existing=bo_exec("SELECT system_key FROM bo_system_connections WHERE LOWER(TRIM(TRAILING '/' FROM base_url))=LOWER(TRIM(TRAILING '/' FROM ?)) AND system_type=? ORDER BY is_active DESC,id ASC LIMIT 1",[$normalizedBase,$r['target_system']])->fetch();
       $systemKey=$existing['system_key']??bo_next_system_key($r['target_system']);
       bo_exec("UPDATE bo_system_connections SET is_active=0,status='inactive',updated_at=NOW() WHERE LOWER(TRIM(TRAILING '/' FROM base_url))=LOWER(TRIM(TRAILING '/' FROM ?)) AND system_type=? AND system_key<>?",[$normalizedBase,$r['target_system'],$systemKey]);
-      $encryptedToken=bo_encrypt_secret($token);
+      $encryptedToken=(string)$r['access_token_encrypted'];
       bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,api_token_hash,api_token_encrypted,access_scope,status,is_active,paired_at,token_last_rotated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,1,NOW(),NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),system_type=VALUES(system_type),base_url=VALUES(base_url),api_token=NULL,api_token_hash=VALUES(api_token_hash),api_token_encrypted=VALUES(api_token_encrypted),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),token_last_rotated_at=NOW(),updated_at=NOW()',[$systemKey,$r['target_name'],$r['target_system'],$normalizedBase,null,hash('sha256',$token),$encryptedToken,$scope,'active']);
       bo_exec("UPDATE bo_pairing_requests SET status='approved',message='Pairing selesai otomatis dan koneksi aktif.',access_token=NULL,access_token_hash=?,access_token_encrypted=?,updated_at=NOW() WHERE id=?",[hash('sha256',$token),$encryptedToken,$id]);
       $pdo->commit();
