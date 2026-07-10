@@ -17,3 +17,12 @@ function bo_db(): PDO {
   return $pdo;
 }
 function bo_exec(string $sql, array $p=[]): PDOStatement { $st=bo_db()->prepare($sql); $st->execute($p); return $st; }
+
+function bo_bootstrap_schema(): void {
+  static $done=false; if($done) return; $done=true;
+  $path=__DIR__.'/Migrations.php';
+  if(is_file($path)){
+    require_once $path;
+    if(function_exists('bo_ensure_schema')) bo_ensure_schema();
+  }
+}

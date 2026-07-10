@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__.'/Database.php';
 require_once __DIR__.'/Helpers.php';
+bo_bootstrap_schema();
 
 const BO_REMEMBER_LOGIN_LIFETIME = 315360000;
 
@@ -69,7 +70,7 @@ function bo_remember_restore_user(): ?array {
       && hash_equals((string)$u['password_fingerprint'],hash('sha256',(string)$u['password_hash']));
     if(!$valid){ bo_remember_forget_current_device(); return null; }
     $tokenId=(int)$u['token_id'];
-    $sessionUser=['id'=>$u['id'],'username'=>$u['username'],'name'=>$u['name'],'role_key'=>$u['role_key']];
+    $sessionUser=['id'=>$u['id'],'username'=>$u['username'],'name'=>$u['name'],'role_key'=>$u['role_key'],'must_change_password'=>(int)($u['must_change_password'] ?? 0)];
     $expires=time()+BO_REMEMBER_LOGIN_LIFETIME;
     bo_exec('UPDATE bo_remember_tokens SET expires_at=?,last_used_at=NOW() WHERE id=?',[date('Y-m-d H:i:s',$expires),$tokenId]);
     bo_remember_set_cookie($raw,$expires); session_regenerate_id(true); $_SESSION['bo_user']=$sessionUser; return $sessionUser;
@@ -80,13 +81,27 @@ function bo_user(): ?array {
   if(empty($_SESSION['bo_user'])) bo_remember_restore_user();
   return $_SESSION['bo_user']??null;
 }
-function bo_require_login(): void { if(!bo_user()){ header('Location: '.bo_url('login.php')); exit; } }
+function bo_require_login(): void {
+  $u=bo_user();
+  if(!$u){ header('Location: '.bo_url('login.php')); exit; }
+  $path=basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+  if(!empty($u['must_change_password']) && $path!=='password_change.php' && $path!=='logout.php'){
+    header('Location: '.bo_url('password_change.php')); exit;
+  }
+}
 function bo_login(string $username,string $password,bool $remember=false): bool {
   $st=bo_exec('SELECT * FROM bo_users WHERE username=? AND is_active=1 LIMIT 1',[$username]); $u=$st->fetch();
   if(!$u || !password_verify($password,$u['password_hash'])) return false;
   $passwordHash=(string)$u['password_hash']; bo_session_start(); session_regenerate_id(true);
-  $_SESSION['bo_user']=['id'=>$u['id'],'username'=>$u['username'],'name'=>$u['name'],'role_key'=>$u['role_key']];
+  $_SESSION['bo_user']=['id'=>$u['id'],'username'=>$u['username'],'name'=>$u['name'],'role_key'=>$u['role_key'],'must_change_password'=>(int)($u['must_change_password'] ?? 0)];
   if($remember) bo_remember_issue((int)$u['id'],$passwordHash); else bo_remember_forget_current_device();
   bo_exec('UPDATE bo_users SET last_login_at=NOW() WHERE id=?',[$u['id']]); return true;
+}
+function bo_change_own_password(int $userId,string $newPassword): void {
+  $hash=password_hash($newPassword,PASSWORD_DEFAULT);
+  bo_exec('UPDATE bo_users SET password_hash=?,must_change_password=0,password_changed_at=NOW(),updated_at=NOW() WHERE id=?',[$hash,$userId]);
+  try { bo_exec('DELETE FROM bo_remember_tokens WHERE user_id=?',[$userId]); } catch(Throwable $e) {}
+  bo_session_start();
+  if(!empty($_SESSION['bo_user'])) $_SESSION['bo_user']['must_change_password']=0;
 }
 function bo_logout(): void { bo_session_start(); bo_remember_forget_current_device(); $_SESSION=[]; session_destroy(); }

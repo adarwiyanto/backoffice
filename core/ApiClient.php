@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__.'/Database.php';
+bo_bootstrap_schema();
 
 function bo_connection(string $key): ?array {
   $st=bo_exec('SELECT * FROM bo_system_connections WHERE system_key=? AND is_active=1 LIMIT 1',[$key]);
@@ -30,10 +31,40 @@ function bo_next_system_key(string $type): string {
   return $base.'_'.date('YmdHis');
 }
 
-function bo_api_token_from_conn(array $conn): string { return (string)($conn['api_token'] ?? $conn['access_token'] ?? ''); }
+function bo_secret_key(): string {
+  $cfg=bo_config();
+  $seed=($cfg['app']['base_url']??'').'|'.($cfg['app']['session_name']??'').'|'.($cfg['db']['name']??'').'|'.($cfg['db']['pass']??'');
+  return hash('sha256',$seed,true);
+}
+function bo_encrypt_secret(string $plain): string {
+  if($plain==='') return '';
+  if(function_exists('openssl_encrypt')){
+    $iv=random_bytes(16);
+    $cipher=openssl_encrypt($plain,'AES-256-CBC',bo_secret_key(),OPENSSL_RAW_DATA,$iv);
+    if($cipher!==false) return 'v1:'.base64_encode($iv.$cipher);
+  }
+  throw new RuntimeException('OpenSSL dibutuhkan untuk menyimpan secret API secara terenkripsi.');
+}
+function bo_decrypt_secret(?string $stored): string {
+  $stored=(string)$stored;
+  if($stored==='') return '';
+  if(str_starts_with($stored,'v1:') && function_exists('openssl_decrypt')){
+    $raw=base64_decode(substr($stored,3),true);
+    if(is_string($raw) && strlen($raw)>16){
+      $iv=substr($raw,0,16); $cipher=substr($raw,16);
+      $plain=openssl_decrypt($cipher,'AES-256-CBC',bo_secret_key(),OPENSSL_RAW_DATA,$iv);
+      if(is_string($plain)) return $plain;
+    }
+  }
+  return '';
+}
+function bo_api_token_from_conn(array $conn): string {
+  $encrypted=bo_decrypt_secret($conn['api_token_encrypted'] ?? '');
+  return $encrypted;
+}
 function bo_redact_secret(string $text): string {
   $text=preg_replace('/(Bearer\s+)[A-Za-z0-9._\-]+/i','$1[REDACTED]',$text);
-  $text=preg_replace('/(api[_-]?token|access[_-]?token|token_plain|authorization)(\"?\s*[:=]\s*\"?)[^\"\s,}]+/i','$1$2[REDACTED]',$text);
+  $text=preg_replace('/(api[_-]?token|access[_-]?token|token[_-]?plain|request[_-]?secret|secret|password|authorization)(\"?\s*[:=]\s*\"?)[^\"\s,}]+/i','$1$2[REDACTED]',$text);
   return $text;
 }
 
