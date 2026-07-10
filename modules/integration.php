@@ -45,22 +45,62 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   if($act==='check_pairing'){
     $id=(int)($_POST['id']??0); $r=bo_exec('SELECT * FROM bo_pairing_requests WHERE id=?',[$id])->fetch();
     if(!$r) bo_integration_redirect('Request pairing tidak ditemukan.','error','pairingModal');
-    $secret=bo_decrypt_secret($r['request_secret'] ?? ''); if($secret==='') $secret=(string)($r['request_secret'] ?? '');
-    $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$secret],'GET');
-    $status=$res['status']??(!empty($res['ok'])?'pending':'failed');
-    bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$res['message']??'', $id]);
-    if($status==='approved' && !empty($res['access_token'])){
-      $scope=$res['access_scope']??bo_scope_for_target($r['target_system']);
-      $normalizedBase=bo_normalize_url((string)$r['target_base_url']);
+
+    // Token dari server tujuan hanya dapat diambil satu kali. Jika token sudah pernah
+    // diterima tetapi finalisasi koneksi sempat gagal, gunakan salinan terenkripsi lokal.
+    $token=bo_decrypt_secret((string)($r['access_token_encrypted']??''));
+    $scope=(string)($r['requested_scope']??bo_scope_for_target((string)$r['target_system']));
+    $remoteMessage=(string)($r['message']??'');
+    $status=(string)($r['status']??'pending');
+
+    if($token===''){
+      $secret=bo_decrypt_secret($r['request_secret'] ?? '');
+      if($secret==='') $secret=(string)($r['request_secret'] ?? '');
+      $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$secret],'GET');
+      $status=(string)($res['status']??(!empty($res['ok'])?'pending':'failed'));
+      $remoteMessage=(string)($res['message']??'');
+
+      if($status!=='approved'){
+        bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$remoteMessage,$id]);
+        bo_integration_redirect('Status pairing: '.$status.'. '.$remoteMessage,$status==='pending'?'success':'error','pairingModal');
+      }
+
+      $token=trim((string)($res['access_token']??''));
+      $scope=(string)($res['access_scope']??bo_scope_for_target((string)$r['target_system']));
+      if($token===''){
+        $message='Approval diterima, tetapi access token tidak dikirim atau sudah pernah diambil. Buat pairing baru untuk koneksi ini.';
+        bo_exec("UPDATE bo_pairing_requests SET status='approved_token_missing',message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",[$message,$id]);
+        bo_integration_redirect($message,'error','pairingModal');
+      }
+
+      // Simpan token lebih dahulu sebelum menyentuh tabel koneksi. Dengan demikian,
+      // kegagalan INSERT/UPDATE berikutnya masih dapat dilanjutkan tanpa meminta token ulang.
+      $encryptedToken=bo_encrypt_secret($token);
+      if($encryptedToken==='' || !hash_equals($token,bo_decrypt_secret($encryptedToken))){
+        $message='Token diterima, tetapi gagal disimpan secara aman. Pairing belum difinalisasi.';
+        bo_exec("UPDATE bo_pairing_requests SET status='failed',message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",[$message,$id]);
+        bo_integration_redirect($message,'error','pairingModal');
+      }
+      bo_exec("UPDATE bo_pairing_requests SET status='approved_processing',message=?,access_token=NULL,access_token_hash=?,access_token_encrypted=?,requested_scope=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?",['Approval diterima. Menyelesaikan koneksi...',hash('sha256',$token),$encryptedToken,$scope,$id]);
+    }
+
+    $normalizedBase=bo_normalize_url((string)$r['target_base_url']);
+    $pdo=bo_db();
+    try {
+      $pdo->beginTransaction();
       $existing=bo_exec('SELECT system_key FROM bo_system_connections WHERE LOWER(TRIM(TRAILING '/' FROM base_url))=LOWER(TRIM(TRAILING '/' FROM ?)) AND system_type=? ORDER BY is_active DESC,id ASC LIMIT 1',[$normalizedBase,$r['target_system']])->fetch();
       $systemKey=$existing['system_key']??bo_next_system_key($r['target_system']);
       bo_exec("UPDATE bo_system_connections SET is_active=0,status='inactive',updated_at=NOW() WHERE LOWER(TRIM(TRAILING '/' FROM base_url))=LOWER(TRIM(TRAILING '/' FROM ?)) AND system_type=? AND system_key<>?",[$normalizedBase,$r['target_system'],$systemKey]);
-      $token=(string)$res['access_token'];
-      bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,api_token_hash,api_token_encrypted,access_scope,status,is_active,paired_at,token_last_rotated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,1,NOW(),NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),system_type=VALUES(system_type),base_url=VALUES(base_url),api_token=NULL,api_token_hash=VALUES(api_token_hash),api_token_encrypted=VALUES(api_token_encrypted),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),token_last_rotated_at=NOW(),updated_at=NOW()',[$systemKey,$r['target_name'],$r['target_system'],$normalizedBase,null,hash('sha256',$token),bo_encrypt_secret($token),$scope,'active']);
-      bo_exec('UPDATE bo_pairing_requests SET access_token=NULL,access_token_hash=?,access_token_encrypted=? WHERE id=?',[hash('sha256',$token),bo_encrypt_secret($token),$id]);
-      bo_integration_redirect('Pairing disetujui dan koneksi aktif. Request telah dibersihkan dari daftar.');
+      $encryptedToken=bo_encrypt_secret($token);
+      bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,api_token_hash,api_token_encrypted,access_scope,status,is_active,paired_at,token_last_rotated_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,1,NOW(),NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),system_type=VALUES(system_type),base_url=VALUES(base_url),api_token=NULL,api_token_hash=VALUES(api_token_hash),api_token_encrypted=VALUES(api_token_encrypted),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),token_last_rotated_at=NOW(),updated_at=NOW()',[$systemKey,$r['target_name'],$r['target_system'],$normalizedBase,null,hash('sha256',$token),$encryptedToken,$scope,'active']);
+      bo_exec("UPDATE bo_pairing_requests SET status='approved',message='Pairing selesai dan koneksi aktif.',access_token=NULL,access_token_hash=?,access_token_encrypted=?,updated_at=NOW() WHERE id=?",[hash('sha256',$token),$encryptedToken,$id]);
+      $pdo->commit();
+    } catch(Throwable $finalizeError) {
+      if($pdo->inTransaction()) $pdo->rollBack();
+      bo_exec("UPDATE bo_pairing_requests SET status='approved_processing',message=?,updated_at=NOW() WHERE id=?",['Token sudah tersimpan. Finalisasi koneksi gagal dan dapat dicoba kembali: '.$finalizeError->getMessage(),$id]);
+      throw $finalizeError;
     }
-    bo_integration_redirect('Status pairing: '.$status.'. '.($res['message']??''),in_array($status,['approved','pending'],true)?'success':'error','pairingModal');
+    bo_integration_redirect('Pairing disetujui dan koneksi aktif.');
   }
   if($act==='health_check'){ foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn) bo_health_check_connection($conn); bo_integration_redirect('Health check semua koneksi selesai.'); }
   if($act==='sync_employees'){ $r=bo_sync_employees(); bo_integration_redirect('Sync pegawai selesai. Diterima '.(int)$r['received'].', disimpan '.(int)$r['saved'].(empty($r['ok'])?'. Error: '.implode('; ',$r['errors']??[]):'.'),empty($r['ok'])?'error':'success','apiCenterModal'); }
@@ -96,7 +136,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   }
 }
 
-$pairings=bo_exec("SELECT * FROM bo_pairing_requests WHERE status IN ('pending','failed') ORDER BY id DESC LIMIT 100")->fetchAll();
+$pairings=bo_exec("SELECT * FROM bo_pairing_requests WHERE status IN ('pending','failed','approved_processing','approved_token_missing') OR (status='approved' AND (access_token_encrypted IS NULL OR access_token_encrypted='')) ORDER BY id DESC LIMIT 100")->fetchAll();
 $conns=bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY system_type,system_name,system_key')->fetchAll();
 $logs=bo_exec('SELECT * FROM bo_sync_logs ORDER BY id DESC LIMIT 100')->fetchAll();
 $tests=bo_exec('SELECT * FROM bo_api_test_runs ORDER BY id DESC LIMIT 100')->fetchAll();
@@ -115,7 +155,7 @@ $failedTests=count(array_filter($tests,fn($t)=>($t['status']??'')!=='success'));
 <div class="section table-wrap integration-table"><h3>Koneksi Aktif</h3><table><thead><tr><th>Sistem</th><th>URL</th><th>Scope</th><th>Health</th><th>Sync</th><th>Test</th><th>Aksi</th></tr></thead><tbody><?php foreach($conns as $c): ?><tr><td><strong><?=e($c['system_name'])?></strong><br><small><?=e($c['system_key'])?> · <?=e($c['system_type']??'-')?></small></td><td><?=e($c['base_url'])?></td><td><?=e($c['access_scope']??'')?></td><td><span class="badge <?=($c['last_health_status']??'')==='ok'?'ok':'warn'?>"><?=e($c['last_health_status']??'belum dicek')?></span><br><small><?=e($c['last_health_message']??'')?></small></td><td><?=e($c['last_sync_at']??'-')?><br><small><?=e($c['last_sync_message']??'')?></small></td><td><form method="post" class="filters" style="margin:0"><input type="hidden" name="action" value="run_test"><input type="hidden" name="connection_id" value="<?=e($c['id'])?>"><select name="test_key"><option value="health">Koneksi</option><option value="auth">Autentikasi</option><option value="employees">Pegawai</option><option value="products">Produk</option><option value="sales">Penjualan</option><option value="stock">Stok</option><option value="transfer">Transfer</option><option value="transaction">Transaksi</option></select><button class="btn">Test</button></form></td><td><form method="post" onsubmit="return confirm('Nonaktifkan koneksi ini?');"><input type="hidden" name="action" value="disable_connection"><input type="hidden" name="id" value="<?=e($c['id'])?>"><button class="btn">Hapus</button></form></td></tr><?php endforeach; if(!$conns): ?><tr><td colspan="7" class="empty-integration">Belum ada koneksi aktif.</td></tr><?php endif; ?></tbody></table></div>
 
 <div class="integration-modal" id="newPairModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Request Pairing Baru</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body"><form method="post"><input type="hidden" name="action" value="request_pairing"><label>Nama Koneksi</label><input name="target_name" placeholder="Adena Pangkal Pinang / Dapur"><label>Jenis Tujuan</label><select name="target_system"><option value="adena">Adena / Toko</option><option value="dapur">Dapur</option></select><label>HTTPS Tujuan</label><input name="target_base_url" placeholder="https://domain-tujuan.com" required><br><button class="btn primary">Kirim Request Pairing</button></form></div></div></div>
-<div class="integration-modal" id="pairingModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Request Pairing Aktif</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Tujuan</th><th>URL</th><th>Status</th><th>Pesan</th><th>Aksi</th></tr></thead><tbody><?php foreach($pairings as $p): ?><tr><td><?=e($p['created_at'])?></td><td><?=e($p['target_name'])?><br><small><?=e($p['target_system'])?></small></td><td><?=e($p['target_base_url'])?></td><td><span class="badge <?=$p['status']==='pending'?'warn':'danger'?>"><?=e($p['status'])?></span></td><td><?=e($p['message']??'')?></td><td><div class="integration-inline-actions"><?php if($p['status']==='pending'): ?><form method="post"><input type="hidden" name="action" value="check_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Cek Status</button></form><?php endif; ?><form method="post"><input type="hidden" name="action" value="dismiss_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Hapus</button></form></div></td></tr><?php endforeach; if(!$pairings): ?><tr><td colspan="6" class="empty-integration"><strong>Tidak ada request pairing.</strong><br>Request yang disetujui otomatis tidak ditampilkan.</td></tr><?php endif; ?></tbody></table></div></div></div>
+<div class="integration-modal" id="pairingModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Request Pairing Aktif</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Tujuan</th><th>URL</th><th>Status</th><th>Pesan</th><th>Aksi</th></tr></thead><tbody><?php foreach($pairings as $p): $pairStatus=(string)($p['status']??''); $canFinalize=in_array($pairStatus,['pending','failed','approved_processing'],true); ?><tr><td><?=e($p['created_at'])?></td><td><?=e($p['target_name'])?><br><small><?=e($p['target_system'])?></small></td><td><?=e($p['target_base_url'])?></td><td><span class="badge <?=$pairStatus==='pending'?'warn':($pairStatus==='approved_processing'?'warn':'danger')?>"><?=e($pairStatus)?></span></td><td><?=e($p['message']??'')?></td><td><div class="integration-inline-actions"><?php if($canFinalize): ?><form method="post"><input type="hidden" name="action" value="check_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn"><?=$pairStatus==='approved_processing'?'Selesaikan Koneksi':'Cek Status'?></button></form><?php endif; ?><form method="post"><input type="hidden" name="action" value="dismiss_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Hapus</button></form></div><?php if($pairStatus==='approved_token_missing'): ?><small>Token dari pairing ini sudah tidak dapat diambil ulang. Buat request pairing baru.</small><?php endif; ?></td></tr><?php endforeach; if(!$pairings): ?><tr><td colspan="6" class="empty-integration"><strong>Tidak ada request pairing yang perlu ditindaklanjuti.</strong><br>Request hanya hilang setelah koneksi benar-benar tersimpan.</td></tr><?php endif; ?></tbody></table></div></div></div>
 <div class="integration-modal" id="apiCenterModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>API Center</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body"><form method="post" class="integration-actions"><button class="btn" name="action" value="health_check">Health Check Semua</button><button class="btn" name="action" value="sync_employees">Sync Pegawai</button><button class="btn" name="action" value="backup_all">Backup Semua</button><button class="btn primary" name="action" value="run_all_tests">Test Semua</button></form></div></div></div>
 <div class="integration-modal" id="apiLogModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>API Test Log</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Test</th><th>Endpoint</th><th>Status</th><th>Pesan</th></tr></thead><tbody><?php foreach($tests as $t): ?><tr><td><?=e($t['created_at'])?></td><td><?=e($t['system_key'])?></td><td><?=e($t['test_key'])?></td><td><?=e($t['endpoint'])?></td><td><span class="badge <?=$t['status']==='success'?'ok':'danger'?>"><?=e($t['status'])?></span></td><td><div class="log-detail" title="<?=e($t['message']??'')?>"><?=e($t['message']??'-')?></div></td></tr><?php endforeach; if(!$tests): ?><tr><td colspan="6" class="empty-integration">Belum ada test.</td></tr><?php endif; ?></tbody></table></div></div></div>
 <div class="integration-modal" id="backupLogModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Backup Log</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Dataset</th><th>Status</th><th>Rows</th><th>Pesan</th></tr></thead><tbody><?php foreach($backupRuns as $b): ?><tr><td><?=e($b['started_at'])?></td><td><?=e($b['system_key'])?></td><td><?=e($b['dataset'])?></td><td><span class="badge <?=$b['status']==='success'?'ok':($b['status']==='running'?'warn':'danger')?>"><?=e($b['status'])?></span></td><td><?=e($b['rows_saved'])?>/<?=e($b['rows_received'])?></td><td><?=e($b['message']??'')?></td></tr><?php endforeach; if(!$backupRuns): ?><tr><td colspan="6" class="empty-integration">Belum ada backup run.</td></tr><?php endif; ?></tbody></table></div></div></div>
