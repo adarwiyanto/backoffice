@@ -7,7 +7,22 @@ function bo_scope_for_target(string $target): string { return 'backoffice_backup
 function bo_integration_redirect(string $message,string $type='success',string $modal=''): void {
   $url='?p=integration&notice='.rawurlencode($message).'&notice_type='.rawurlencode($type);
   if($modal!=='') $url.='&reopen='.rawurlencode($modal);
-  header('Location: '.$url); exit;
+
+  // Normal path: index.php starts an output buffer, so the Location header remains valid.
+  if (!headers_sent()) {
+    header('Location: '.$url, true, 303);
+    exit;
+  }
+
+  // Defensive fallback for unusual hosting/output-buffer settings. Never leave a white page.
+  $safeUrl=htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+  echo '<!doctype html><html lang="id"><head><meta charset="utf-8">'
+      .'<meta http-equiv="refresh" content="0;url='.$safeUrl.'">'
+      .'<title>Memproses…</title></head><body>'
+      .'<p>Permintaan selesai. <a href="'.$safeUrl.'">Kembali ke Integrasi API</a>.</p>'
+      .'<script>window.location.replace('.json_encode($url, JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE).');</script>'
+      .'</body></html>';
+  exit;
 }
 
 $msg=trim((string)($_GET['notice']??''));

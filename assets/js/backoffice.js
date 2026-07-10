@@ -11,6 +11,21 @@ document.addEventListener('DOMContentLoaded',()=>{
       ? event.submitter
       : form.querySelector('button[type="submit"],button:not([type]),input[type="submit"]');
     if(!btn||btn.disabled)return;
+
+    // A disabled submitter is excluded from the native POST payload. Preserve its name/value
+    // first, because API Center stores the requested action on the clicked button itself.
+    if(btn.name){
+      let carrier=form.querySelector('input[type="hidden"][data-submitter-carrier="1"]');
+      if(!carrier){
+        carrier=document.createElement('input');
+        carrier.type='hidden';
+        carrier.dataset.submitterCarrier='1';
+        form.appendChild(carrier);
+      }
+      carrier.name=btn.name;
+      carrier.value=btn.value;
+    }
+
     btn.disabled=true;
     btn.classList.add('is-loading');
     btn.dataset.originalText=btn instanceof HTMLInputElement?btn.value:btn.textContent;
