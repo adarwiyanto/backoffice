@@ -4,25 +4,31 @@ function bo_pair_code(): string { return 'BO-'.date('Ymd-His').'-'.strtoupper(bi
 function bo_pair_secret(): string { return bin2hex(random_bytes(32)); }
 function bo_normalize_url(string $url): string { $url=trim($url); if($url!==''&&!preg_match('~^https://~i',$url)) $url='https://'.preg_replace('~^http://~i','',$url); return rtrim($url,'/'); }
 function bo_scope_for_target(string $target): string { return 'backoffice_backup'; }
-function bo_integration_redirect(string $message): void { header('Location: ?p=integration&notice='.rawurlencode($message)); exit; }
+function bo_integration_redirect(string $message,string $type='success',string $modal=''): void {
+  $url='?p=integration&notice='.rawurlencode($message).'&notice_type='.rawurlencode($type);
+  if($modal!=='') $url.='&reopen='.rawurlencode($modal);
+  header('Location: '.$url); exit;
+}
 
 $msg=trim((string)($_GET['notice']??''));
+$noticeType=(($_GET['notice_type']??'success')==='error')?'error':'success';
+$reopen=preg_replace('/[^a-zA-Z0-9_-]/','',(string)($_GET['reopen']??''));
 if($_SERVER['REQUEST_METHOD']==='POST'){
   $act=$_POST['action']??'';
   if($act==='request_pairing'){
     $target=$_POST['target_system']??'adena';
     $name=trim($_POST['target_name']??ucfirst($target));
     $url=bo_normalize_url($_POST['target_base_url']??'');
-    if($url==='') bo_integration_redirect('URL tujuan wajib diisi.');
+    if($url==='') bo_integration_redirect('URL tujuan wajib diisi.','error','newPairModal');
     $code=bo_pair_code(); $secret=bo_pair_secret(); $cfg=bo_config(); $boUrl=rtrim($cfg['app']['base_url']??'', '/');
     $payload=['request_code'=>$code,'request_secret_hash'=>password_hash($secret,PASSWORD_DEFAULT),'requester_name'=>'Back Office','requester_type'=>'backoffice','requester_base_url'=>$boUrl,'target_type'=>$target,'callback_url'=>''];
     $res=bo_remote_json($url,'api/pairing/request.php',$payload,'POST');
     bo_exec('INSERT INTO bo_pairing_requests(target_system,target_name,target_base_url,request_code,request_secret,request_secret_hash,requester_name,requester_type,requested_scope,status,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,NOW())',[$target,$name,$url,$code,bo_encrypt_secret($secret),password_hash($secret,PASSWORD_DEFAULT),'Back Office','backoffice',bo_scope_for_target($target),!empty($res['ok'])?'pending':'failed',$res['message']??'']);
-    bo_integration_redirect(!empty($res['ok'])?'Request pairing terkirim. Approve dari sistem tujuan.':'Request gagal: '.($res['message']??'error'));
+    bo_integration_redirect(!empty($res['ok'])?'Request pairing terkirim. Approve dari sistem tujuan.':'Request gagal: '.($res['message']??'error'),!empty($res['ok'])?'success':'error','pairingModal');
   }
   if($act==='check_pairing'){
     $id=(int)($_POST['id']??0); $r=bo_exec('SELECT * FROM bo_pairing_requests WHERE id=?',[$id])->fetch();
-    if(!$r) bo_integration_redirect('Request pairing tidak ditemukan.');
+    if(!$r) bo_integration_redirect('Request pairing tidak ditemukan.','error','pairingModal');
     $secret=bo_decrypt_secret($r['request_secret'] ?? ''); if($secret==='') $secret=(string)($r['request_secret'] ?? '');
     $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$secret],'GET');
     $status=$res['status']??(!empty($res['ok'])?'pending':'failed');
@@ -36,21 +42,21 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
       bo_exec('UPDATE bo_pairing_requests SET access_token=NULL,access_token_hash=?,access_token_encrypted=? WHERE id=?',[hash('sha256',$token),bo_encrypt_secret($token),$id]);
       bo_integration_redirect('Pairing disetujui dan koneksi aktif. Request telah dibersihkan dari daftar.');
     }
-    bo_integration_redirect('Status pairing: '.$status.'. '.($res['message']??''));
+    bo_integration_redirect('Status pairing: '.$status.'. '.($res['message']??''),in_array($status,['approved','pending'],true)?'success':'error','pairingModal');
   }
   if($act==='health_check'){ foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn) bo_health_check_connection($conn); bo_integration_redirect('Health check semua koneksi selesai.'); }
-  if($act==='sync_employees'){ $r=bo_sync_employees(); bo_integration_redirect('Sync pegawai selesai. Diterima '.(int)$r['received'].', disimpan '.(int)$r['saved'].(empty($r['ok'])?'. Error: '.implode('; ',$r['errors']??[]):'.')); }
-  if($act==='backup_all'){ $r=bo_backup_all(); bo_integration_redirect('Backup selesai. Item: '.count($r['results']).(empty($r['ok'])?'. Error: '.implode('; ',$r['errors']):'.')); }
+  if($act==='sync_employees'){ $r=bo_sync_employees(); bo_integration_redirect('Sync pegawai selesai. Diterima '.(int)$r['received'].', disimpan '.(int)$r['saved'].(empty($r['ok'])?'. Error: '.implode('; ',$r['errors']??[]):'.'),empty($r['ok'])?'error':'success','apiCenterModal'); }
+  if($act==='backup_all'){ $r=bo_backup_all(); bo_integration_redirect('Backup selesai. Item: '.count($r['results']).(empty($r['ok'])?'. Error: '.implode('; ',$r['errors']):'.'),empty($r['ok'])?'error':'success','backupLogModal'); }
   if($act==='run_test'){
     $id=(int)($_POST['connection_id']??0); $test=(string)($_POST['test_key']??'health');
     $conn=bo_exec('SELECT * FROM bo_system_connections WHERE id=? LIMIT 1',[$id])->fetch();
-    if($conn){ $r=bo_run_api_test($conn,$test); bo_integration_redirect('Test '.$test.' '.(!empty($r['ok'])?'berhasil':'gagal').': '.$r['message']); }
-    bo_integration_redirect('Koneksi tidak ditemukan.');
+    if($conn){ $r=bo_run_api_test($conn,$test); bo_integration_redirect('Test '.$test.' '.(!empty($r['ok'])?'berhasil':'gagal').': '.$r['message'],!empty($r['ok'])?'success':'error','apiLogModal'); }
+    bo_integration_redirect('Koneksi tidak ditemukan.','error','apiCenterModal');
   }
   if($act==='run_all_tests'){
     $testsToRun=['health','auth','employees','products','sales','stock','transfer','transaction']; $ok=0; $fail=0;
     foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn){ foreach($testsToRun as $test){ $r=bo_run_api_test($conn,$test); !empty($r['ok'])?$ok++:$fail++; } }
-    bo_integration_redirect('Test semua selesai. OK: '.$ok.', gagal: '.$fail.'.');
+    bo_integration_redirect('Test semua selesai. OK: '.$ok.', gagal: '.$fail.'.',$fail>0?'error':'success','apiLogModal');
   }
   if($act==='disable_connection'){
     $id=(int)($_POST['id']??0); bo_exec("UPDATE bo_system_connections SET is_active=0,status='inactive',updated_at=NOW() WHERE id=?",[$id]);
@@ -58,7 +64,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
   }
   if($act==='dismiss_pairing'){
     $id=(int)($_POST['id']??0); bo_exec("UPDATE bo_pairing_requests SET status='dismissed',updated_at=NOW() WHERE id=? AND status<>'approved'",[$id]);
-    bo_integration_redirect('Request pairing dihapus dari daftar.');
+    bo_integration_redirect('Request pairing dihapus dari daftar.','success','pairingModal');
   }
 }
 
@@ -74,7 +80,7 @@ $failedTests=count(array_filter($tests,fn($t)=>($t['status']??'')!=='success'));
 .integration-actions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.integration-actions .btn{min-height:38px}.integration-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.integration-stat{padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.integration-stat strong{font-size:23px;display:block}.integration-stat span{font-size:12px;color:var(--muted)}.integration-table table{min-width:780px}.integration-table th,.integration-table td{font-size:12px;padding:7px 8px;vertical-align:middle}.integration-inline-actions{display:flex;gap:6px;flex-wrap:wrap}.integration-modal{position:fixed;inset:0;background:rgba(15,23,42,.52);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.integration-modal.open{display:flex}.integration-modal-box{background:#fff;border-radius:14px;width:min(980px,100%);max-height:88vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.25)}.integration-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}.integration-modal-body{padding:16px}.integration-close{border:0;background:#f1f5f9;border-radius:8px;padding:7px 10px;cursor:pointer}.log-detail{max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty-integration{padding:16px;text-align:center;color:var(--muted)}@media(max-width:760px){.integration-stats{grid-template-columns:1fr}.integration-actions .btn{width:100%}.integration-modal{padding:8px}.integration-modal-box{max-height:94vh}}
 </style>
 <div class="page-title"><div><h1>Integrasi & Pairing API</h1><div class="muted">Kelola pairing, koneksi aktif, pemeriksaan API, backup, dan log dari satu halaman ringkas.</div></div><div class="notif"><button type="button" class="btn" data-open-modal="pairingModal">🔔 <?=$pending?'<span class="notif-badge">'.$pending.'</span>':'0'?></button></div></div>
-<?php if($msg): ?><div class="card" style="border-color:#bfdbfe;background:#eff6ff"><?=e($msg)?></div><?php endif; ?>
+<?php if($msg): ?><div class="action-toast <?=$noticeType==='error'?'error':'success'?>" id="actionToast" role="status"><strong><?=$noticeType==='error'?'Aksi gagal':'Aksi berhasil'?></strong><span><?=e($msg)?></span><button type="button" aria-label="Tutup" onclick="this.parentElement.remove()">×</button></div><?php endif; ?>
 <div class="integration-stats"><div class="integration-stat"><strong><?=count($conns)?></strong><span>Koneksi aktif</span></div><div class="integration-stat"><strong><?=$pending?></strong><span>Request menunggu approval</span></div><div class="integration-stat"><strong><?=$failedTests?></strong><span>Test API gagal</span></div></div>
 <div class="integration-actions">
 <button type="button" class="btn primary" data-open-modal="newPairModal">＋ Buat Pairing</button><button type="button" class="btn" data-open-modal="pairingModal">Request Pairing <?=$pending?'('.$pending.')':''?></button><button type="button" class="btn" data-open-modal="apiCenterModal">API Center</button><button type="button" class="btn" data-open-modal="apiLogModal">API Test Log</button><button type="button" class="btn" data-open-modal="backupLogModal">Backup Log</button><button type="button" class="btn" data-open-modal="syncLogModal">Sync Log</button><button type="button" class="btn" data-open-modal="rulesModal">Aturan Akses</button>
@@ -88,4 +94,4 @@ $failedTests=count(array_filter($tests,fn($t)=>($t['status']??'')!=='success'));
 <div class="integration-modal" id="backupLogModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Backup Log</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Dataset</th><th>Status</th><th>Rows</th><th>Pesan</th></tr></thead><tbody><?php foreach($backupRuns as $b): ?><tr><td><?=e($b['started_at'])?></td><td><?=e($b['system_key'])?></td><td><?=e($b['dataset'])?></td><td><span class="badge <?=$b['status']==='success'?'ok':($b['status']==='running'?'warn':'danger')?>"><?=e($b['status'])?></span></td><td><?=e($b['rows_saved'])?>/<?=e($b['rows_received'])?></td><td><?=e($b['message']??'')?></td></tr><?php endforeach; if(!$backupRuns): ?><tr><td colspan="6" class="empty-integration">Belum ada backup run.</td></tr><?php endif; ?></tbody></table></div></div></div>
 <div class="integration-modal" id="syncLogModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Sync Log</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Respons</th></tr></thead><tbody><?php foreach($logs as $l): $response=(string)($l['response_payload']??($l['message']??'')); ?><tr><td><?=e($l['created_at'])?></td><td><?=e($l['system_key'])?></td><td><?=e($l['endpoint'])?></td><td><span class="badge <?=$l['status']==='success'?'ok':'danger'?>"><?=e($l['status'])?></span></td><td><?=e($l['status_code'])?></td><td><div class="log-detail" title="<?=e($response)?>"><?=e($response!==''?$response:'-')?></div></td></tr><?php endforeach; if(!$logs): ?><tr><td colspan="6" class="empty-integration">Belum ada sync log.</td></tr><?php endif; ?></tbody></table></div></div></div>
 <div class="integration-modal" id="rulesModal"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Aturan Akses Integrasi</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body"><ul class="scope-note"><li>Token disimpan terenkripsi dan hash; token tidak ditampilkan di halaman.</li><li>Scope Back Office dibatasi untuk backup/sinkronisasi dan dry-run test.</li><li>Request approved otomatis hilang dari daftar, tetapi histori tetap tersimpan.</li><li>Koneksi lama dapat dinonaktifkan melalui tombol Hapus.</li></ul></div></div></div>
-<script>(function(){function closeModal(m){if(m)m.classList.remove('open')}document.querySelectorAll('[data-open-modal]').forEach(function(b){b.addEventListener('click',function(){var e=document.getElementById(b.getAttribute('data-open-modal'));if(e)e.classList.add('open')})});document.querySelectorAll('[data-close-modal]').forEach(function(b){b.addEventListener('click',function(){closeModal(b.closest('.integration-modal'))})});document.querySelectorAll('.integration-modal').forEach(function(m){m.addEventListener('click',function(e){if(e.target===m)closeModal(m)})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.integration-modal.open').forEach(closeModal)})})();</script>
+<script>(function(){function closeModal(m){if(m)m.classList.remove('open')}document.querySelectorAll('[data-open-modal]').forEach(function(b){b.addEventListener('click',function(){var e=document.getElementById(b.getAttribute('data-open-modal'));if(e)e.classList.add('open')})});document.querySelectorAll('[data-close-modal]').forEach(function(b){b.addEventListener('click',function(){closeModal(b.closest('.integration-modal'))})});document.querySelectorAll('.integration-modal').forEach(function(m){m.addEventListener('click',function(e){if(e.target===m)closeModal(m)})});document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.integration-modal.open').forEach(closeModal)});document.querySelectorAll('form[method="post"]').forEach(function(f){f.addEventListener('submit',function(){var b=f.querySelector('button[type="submit"],button:not([type])');if(!b)return;b.disabled=true;b.dataset.originalText=b.textContent;b.textContent='Memproses…';b.classList.add('is-loading')})});var reopen=<?=json_encode($reopen,JSON_UNESCAPED_SLASHES)?>;if(reopen){var modal=document.getElementById(reopen);if(modal)modal.classList.add('open')}var toast=document.getElementById('actionToast');if(toast)setTimeout(function(){if(toast&&toast.parentNode)toast.remove()},8000)})();</script>

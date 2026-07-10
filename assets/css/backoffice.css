@@ -2,3 +2,7 @@
 
 /* Patch 20260702: SDM KPI submenu */
 .nav details.nav-sub{margin:3px 0}.nav details.nav-sub>summary{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:12px;cursor:pointer;font-size:13px;list-style:none}.nav details.nav-sub>summary::-webkit-details-marker{display:none}.nav details.nav-sub[open]>summary{background:#f2f7ff;font-weight:800}.nav details.nav-sub a{margin-left:14px;font-size:12px}
+
+
+/* Patch 20260710: visible action feedback and safe loading state */
+.action-toast{position:fixed;right:20px;top:76px;z-index:1000;max-width:min(520px,calc(100vw - 32px));display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start;padding:13px 14px;border-radius:12px;box-shadow:0 16px 40px rgba(15,23,42,.18);border:1px solid;background:#fff}.action-toast.success{border-color:#86efac;color:#166534;background:#f0fdf4}.action-toast.error{border-color:#fca5a5;color:#991b1b;background:#fef2f2}.action-toast strong{white-space:nowrap}.action-toast span{line-height:1.4}.action-toast button{border:0;background:transparent;color:inherit;font-size:20px;line-height:1;cursor:pointer}.btn:disabled,.btn.is-loading{opacity:.65;cursor:wait;pointer-events:none}@media(max-width:620px){.action-toast{left:16px;right:16px;top:70px;grid-template-columns:1fr auto}.action-toast strong{grid-column:1}.action-toast span{grid-column:1}.action-toast button{grid-column:2;grid-row:1/3}}

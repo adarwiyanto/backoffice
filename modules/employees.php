@@ -5,9 +5,14 @@ $msg='';
 $err='';
 if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action'] ?? '')==='sync_employees'){
   $res=bo_sync_employees();
-  $msg='Sync pegawai selesai. Diterima: '.(int)($res['received'] ?? 0).', disimpan: '.(int)($res['saved'] ?? 0).'.';
-  if(empty($res['ok'])) $err=implode('; ', $res['errors'] ?? []);
+  $message='Sync pegawai selesai. Diterima: '.(int)($res['received'] ?? 0).', disimpan: '.(int)($res['saved'] ?? 0).'.';
+  $type='success';
+  if(empty($res['ok'])){ $type='error'; $message.=' Error: '.implode('; ', $res['errors'] ?? []); }
+  header('Location: ?p=employees&sync_notice='.rawurlencode($message).'&sync_type='.$type); exit;
 }
+$msg=trim((string)($_GET['sync_notice']??''));
+$err=(($_GET['sync_type']??'')==='error')?$msg:'';
+if($err!=='') $msg='';
 
 $src=$_GET['source'] ?? 'all';
 $rows=bo_employee_rows($src);
