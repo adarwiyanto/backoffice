@@ -4,46 +4,94 @@ function bo_pair_code(): string { return 'BO-'.date('Ymd-His').'-'.strtoupper(bi
 function bo_pair_secret(): string { return bin2hex(random_bytes(32)); }
 function bo_normalize_url(string $url): string { $url=trim($url); if($url!==''&&!preg_match('~^https?://~i',$url)) $url='https://'.$url; return rtrim($url,'/'); }
 function bo_scope_for_target(string $target): string { return 'admin_rw'; }
-$msg='';
+function bo_integration_redirect(string $message): void { header('Location: ?p=integration&notice='.rawurlencode($message)); exit; }
+
+$msg=trim((string)($_GET['notice']??''));
 if($_SERVER['REQUEST_METHOD']==='POST'){
- $act=$_POST['action']??'';
- if($act==='request_pairing'){
-  $target=$_POST['target_system']??'adena'; $name=trim($_POST['target_name']??ucfirst($target)); $url=bo_normalize_url($_POST['target_base_url']??'');
-  if($url==='') $msg='URL tujuan wajib diisi.'; else {
+  $act=$_POST['action']??'';
+  if($act==='request_pairing'){
+    $target=$_POST['target_system']??'adena';
+    $name=trim($_POST['target_name']??ucfirst($target));
+    $url=bo_normalize_url($_POST['target_base_url']??'');
+    if($url==='') bo_integration_redirect('URL tujuan wajib diisi.');
     $code=bo_pair_code(); $secret=bo_pair_secret(); $cfg=bo_config(); $boUrl=rtrim($cfg['app']['base_url']??'', '/');
     $payload=['request_code'=>$code,'request_secret_hash'=>password_hash($secret,PASSWORD_DEFAULT),'requester_name'=>'Back Office','requester_type'=>'backoffice','requester_base_url'=>$boUrl,'target_type'=>$target,'callback_url'=>''];
     $res=bo_remote_json($url,'api/pairing/request.php',$payload,'POST');
     bo_exec('INSERT INTO bo_pairing_requests(target_system,target_name,target_base_url,request_code,request_secret,requester_name,requester_type,requested_scope,status,message,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,NOW())',[$target,$name,$url,$code,$secret,'Back Office','backoffice',bo_scope_for_target($target),!empty($res['ok'])?'pending':'failed',$res['message']??'']);
-    $msg=!empty($res['ok'])?'Request pairing terkirim. Approve dari sistem tujuan.':'Request gagal: '.($res['message']??'error');
+    bo_integration_redirect(!empty($res['ok'])?'Request pairing terkirim. Approve dari sistem tujuan.':'Request gagal: '.($res['message']??'error'));
   }
- }
- if($act==='check_pairing'){
-  $id=(int)($_POST['id']??0); $st=bo_exec('SELECT * FROM bo_pairing_requests WHERE id=?',[$id]); $r=$st->fetch();
-  if($r){
+  if($act==='check_pairing'){
+    $id=(int)($_POST['id']??0);
+    $r=bo_exec('SELECT * FROM bo_pairing_requests WHERE id=?',[$id])->fetch();
+    if(!$r) bo_integration_redirect('Request pairing tidak ditemukan.');
     $res=bo_remote_json($r['target_base_url'],'api/pairing/status.php',['request_code'=>$r['request_code'],'request_secret'=>$r['request_secret']],'GET');
-    $status=$res['status']??($res['ok']?'pending':'failed');
+    $status=$res['status']??(!empty($res['ok'])?'pending':'failed');
     bo_exec('UPDATE bo_pairing_requests SET status=?,message=?,last_checked_at=NOW(),updated_at=NOW() WHERE id=?',[$status,$res['message']??'', $id]);
     if($status==='approved' && !empty($res['access_token'])){
       $scope=$res['access_scope']??bo_scope_for_target($r['target_system']);
-      $existing=bo_exec('SELECT system_key FROM bo_system_connections WHERE base_url=? AND (system_type=? OR system_key=?) LIMIT 1',[$r['target_base_url'],$r['target_system'],$r['target_system']])->fetch();
+      $existing=bo_exec('SELECT system_key FROM bo_system_connections WHERE base_url=? AND system_type=? ORDER BY is_active DESC,id ASC LIMIT 1',[$r['target_base_url'],$r['target_system']])->fetch();
       $systemKey=$existing['system_key']??bo_next_system_key($r['target_system']);
       bo_exec('INSERT INTO bo_system_connections(system_key,system_name,system_type,base_url,api_token,access_scope,status,is_active,paired_at,created_at) VALUES(?,?,?,?,?,?,?,1,NOW(),NOW()) ON DUPLICATE KEY UPDATE system_name=VALUES(system_name),system_type=VALUES(system_type),base_url=VALUES(base_url),api_token=VALUES(api_token),access_scope=VALUES(access_scope),status=VALUES(status),is_active=1,paired_at=NOW(),updated_at=NOW()',[$systemKey,$r['target_name'],$r['target_system'],$r['target_base_url'],$res['access_token'],$scope,'active']);
       bo_exec('UPDATE bo_pairing_requests SET access_token=? WHERE id=?',[$res['access_token'],$id]);
+      bo_integration_redirect('Pairing disetujui dan koneksi aktif. Request telah dibersihkan dari daftar.');
     }
-    $msg='Status pairing: '.$status;
+    bo_integration_redirect('Status pairing: '.$status.'. '.($res['message']??''));
   }
- }
- if($act==='health_check'){ foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn) bo_health_check_connection($conn); $msg='Health check selesai.'; }
+  if($act==='health_check'){
+    foreach(bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY id ASC')->fetchAll() as $conn) bo_health_check_connection($conn);
+    bo_integration_redirect('Health check semua koneksi selesai.');
+  }
+  if($act==='disable_connection'){
+    $id=(int)($_POST['id']??0);
+    bo_exec("UPDATE bo_system_connections SET is_active=0,status='inactive',updated_at=NOW() WHERE id=?",[$id]);
+    bo_integration_redirect('Koneksi dinonaktifkan dan dihapus dari daftar koneksi aktif.');
+  }
+  if($act==='dismiss_pairing'){
+    $id=(int)($_POST['id']??0);
+    bo_exec("UPDATE bo_pairing_requests SET status='dismissed',updated_at=NOW() WHERE id=? AND status<>'approved'",[$id]);
+    bo_integration_redirect('Request pairing dihapus dari daftar.');
+  }
 }
-$pairings=bo_exec('SELECT * FROM bo_pairing_requests ORDER BY id DESC LIMIT 100')->fetchAll();
-$conns=bo_exec('SELECT * FROM bo_system_connections ORDER BY system_key')->fetchAll();
-$logs=bo_exec('SELECT * FROM bo_sync_logs ORDER BY id DESC LIMIT 50')->fetchAll();
-$pending=0; foreach($pairings as $p){ if($p['status']==='pending') $pending++; }
+
+$pairings=bo_exec("SELECT * FROM bo_pairing_requests WHERE status IN ('pending','failed') ORDER BY id DESC LIMIT 100")->fetchAll();
+$conns=bo_exec('SELECT * FROM bo_system_connections WHERE is_active=1 ORDER BY system_type,system_name,system_key')->fetchAll();
+$logs=bo_exec('SELECT * FROM bo_sync_logs ORDER BY id DESC LIMIT 100')->fetchAll();
+$pending=count(array_filter($pairings,fn($p)=>($p['status']??'')==='pending'));
+$failedLogs=count(array_filter($logs,fn($l)=>($l['status']??'')!=='success'));
 ?>
-<div class="page-title"><div><h1>Integrasi & Pairing API</h1><div class="muted">Request pairing otomatis. Tidak perlu input token manual.</div></div><div class="notif"><button class="btn">🔔 <?= $pending?'<span class="notif-badge">'.$pending.'</span>':'' ?></button></div></div>
-<style>.notif-badge{background:#ef4444;color:#fff;border-radius:999px;padding:2px 7px;font-size:11px}.scope-note li{margin:4px 0}@media(max-width:760px){input,select,.btn{min-height:42px;font-size:15px}}</style>
+<style>
+.integration-actions{display:flex;gap:9px;flex-wrap:wrap;margin:14px 0}.integration-actions .btn{min-height:38px}.integration-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:16px}.integration-stat{padding:14px;border:1px solid #e5e7eb;border-radius:12px;background:#fff}.integration-stat strong{font-size:23px;display:block}.integration-stat span{font-size:12px;color:var(--muted)}.integration-table table{min-width:780px}.integration-table th,.integration-table td{font-size:12px;padding:7px 8px;vertical-align:middle}.integration-inline-actions{display:flex;gap:6px;flex-wrap:wrap}.integration-modal{position:fixed;inset:0;background:rgba(15,23,42,.52);display:none;align-items:center;justify-content:center;padding:18px;z-index:9999}.integration-modal.open{display:flex}.integration-modal-box{background:#fff;border-radius:14px;width:min(920px,100%);max-height:88vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.25)}.integration-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2}.integration-modal-body{padding:16px}.integration-close{border:0;background:#f1f5f9;border-radius:8px;padding:7px 10px;cursor:pointer}.log-detail{max-width:330px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.empty-integration{padding:16px;text-align:center;color:var(--muted)}@media(max-width:760px){.integration-stats{grid-template-columns:1fr}.integration-actions .btn{width:100%}.integration-modal{padding:8px}.integration-modal-box{max-height:94vh}}
+</style>
+<div class="page-title"><div><h1>Integrasi & Pairing API</h1><div class="muted">Kelola pairing, koneksi aktif, pemeriksaan API, dan log dari satu halaman ringkas.</div></div><div class="notif"><button type="button" class="btn" data-open-modal="pairingModal">🔔 <?=$pending?'<span class="notif-badge">'.$pending.'</span>':'0'?></button></div></div>
 <?php if($msg): ?><div class="card" style="border-color:#bfdbfe;background:#eff6ff"><?=e($msg)?></div><?php endif; ?>
-<div class="grid-2"><div class="card"><h3>Request Pairing Baru</h3><form method="post"><input type="hidden" name="action" value="request_pairing"><label>Nama Koneksi</label><input name="target_name" placeholder="Adena Pangkal Pinang / Dapur"><label>Jenis Tujuan</label><select name="target_system"><option value="adena">Adena / Toko</option><option value="dapur">Dapur</option></select><label>HTTPS Tujuan</label><input name="target_base_url" placeholder="https://domain-tujuan.com" required><br><button class="btn primary">Kirim Request Pairing</button></form></div><div class="card"><h3>Aturan</h3><ul class="scope-note"><li>Back Office ke Adena/Dapur: admin operasional read/write; user hanya lihat; bukan owner.</li><li>Scope Back Office bukan owner.</li><li>POS Desktop tidak diubah.</li><li>API web lain tetap seperti semula.</li><li>Tombol test tetap tersedia setelah pairing approve.</li></ul><form method="post"><input type="hidden" name="action" value="health_check"><button class="btn">Health Check Semua</button></form></div></div>
-<div class="section table-wrap"><h3>Request Pairing</h3><table><thead><tr><th>Waktu</th><th>Tujuan</th><th>URL</th><th>Status</th><th>Pesan</th><th>Aksi</th></tr></thead><tbody><?php foreach($pairings as $p): ?><tr><td><?=e($p['created_at'])?></td><td><?=e($p['target_name'])?><br><small><?=e($p['target_system'])?></small></td><td><?=e($p['target_base_url'])?></td><td><span class="badge <?=$p['status']==='approved'?'ok':($p['status']==='pending'?'warn':'danger')?>"><?=e($p['status'])?></span></td><td><?=e($p['message']??'')?></td><td><form method="post"><input type="hidden" name="action" value="check_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Cek Status</button></form></td></tr><?php endforeach; if(!$pairings): ?><tr><td colspan="6" class="muted">Belum ada request.</td></tr><?php endif; ?></tbody></table></div>
-<div class="section table-wrap"><h3>Koneksi Aktif</h3><table><thead><tr><th>Sistem</th><th>URL</th><th>Scope</th><th>Health</th><th>Pesan</th></tr></thead><tbody><?php foreach($conns as $c): ?><tr><td><?=e($c['system_name'])?></td><td><?=e($c['base_url'])?></td><td><?=e($c['access_scope']??'')?></td><td><span class="badge <?=($c['last_health_status']??'')==='ok'?'ok':'warn'?>"><?=e($c['last_health_status']??'belum dicek')?></span></td><td><?=e($c['last_health_message']??'')?></td></tr><?php endforeach; ?></tbody></table></div>
-<div class="section table-wrap"><h3>Sync Log</h3><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Endpoint</th><th>Status</th><th>Code</th></tr></thead><tbody><?php foreach($logs as $l): ?><tr><td><?=e($l['created_at'])?></td><td><?=e($l['system_key'])?></td><td><?=e($l['endpoint'])?></td><td><span class="badge <?=$l['status']==='success'?'ok':'danger'?>"><?=e($l['status'])?></span></td><td><?=e($l['status_code'])?></td></tr><?php endforeach; ?></tbody></table></div>
+<div class="integration-stats">
+  <div class="integration-stat"><strong><?=count($conns)?></strong><span>Koneksi aktif</span></div>
+  <div class="integration-stat"><strong><?=$pending?></strong><span>Request menunggu approval</span></div>
+  <div class="integration-stat"><strong><?=$failedLogs?></strong><span>Kegagalan pada 100 log terakhir</span></div>
+</div>
+<div class="integration-actions">
+  <button type="button" class="btn primary" data-open-modal="newPairModal">＋ Buat Pairing</button>
+  <button type="button" class="btn" data-open-modal="pairingModal">Request Pairing <?=$pending?'('.$pending.')':''?></button>
+  <button type="button" class="btn" data-open-modal="apiLogModal">API Test / Sync Log</button>
+  <button type="button" class="btn" data-open-modal="rulesModal">Aturan Akses</button>
+  <form method="post" style="display:inline"><input type="hidden" name="action" value="health_check"><button class="btn">Jalankan Health Check</button></form>
+</div>
+
+<div class="section table-wrap integration-table"><h3>Koneksi Aktif</h3><table><thead><tr><th>Sistem</th><th>URL</th><th>Scope</th><th>Health</th><th>Pesan</th><th>Aksi</th></tr></thead><tbody><?php foreach($conns as $c): ?><tr><td><strong><?=e($c['system_name'])?></strong><br><small><?=e($c['system_key'])?> · <?=e($c['system_type']??'-')?></small></td><td><?=e($c['base_url'])?></td><td><?=e($c['access_scope']??'')?></td><td><span class="badge <?=($c['last_health_status']??'')==='ok'?'ok':'warn'?>"><?=e($c['last_health_status']??'belum dicek')?></span></td><td><?=e($c['last_health_message']??'')?></td><td><form method="post" onsubmit="return confirm('Nonaktifkan koneksi ini? Data koneksi tetap tersimpan dan dapat dipairing ulang.');"><input type="hidden" name="action" value="disable_connection"><input type="hidden" name="id" value="<?=e($c['id'])?>"><button class="btn">Hapus</button></form></td></tr><?php endforeach; if(!$conns): ?><tr><td colspan="6" class="empty-integration">Belum ada koneksi aktif.</td></tr><?php endif; ?></tbody></table></div>
+
+<div class="integration-modal" id="newPairModal" role="dialog" aria-modal="true"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Request Pairing Baru</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body"><form method="post"><input type="hidden" name="action" value="request_pairing"><label>Nama Koneksi</label><input name="target_name" placeholder="Adena Pangkal Pinang / Dapur"><label>Jenis Tujuan</label><select name="target_system"><option value="adena">Adena / Toko</option><option value="dapur">Dapur</option></select><label>HTTPS Tujuan</label><input name="target_base_url" placeholder="https://domain-tujuan.com" required><br><button class="btn primary">Kirim Request Pairing</button></form></div></div></div>
+
+<div class="integration-modal" id="pairingModal" role="dialog" aria-modal="true"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Request Pairing Aktif</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Tujuan</th><th>URL</th><th>Status</th><th>Pesan</th><th>Aksi</th></tr></thead><tbody><?php foreach($pairings as $p): ?><tr><td><?=e($p['created_at'])?></td><td><?=e($p['target_name'])?><br><small><?=e($p['target_system'])?></small></td><td><?=e($p['target_base_url'])?></td><td><span class="badge <?=$p['status']==='pending'?'warn':'danger'?>"><?=e($p['status'])?></span></td><td><?=e($p['message']??'')?></td><td><div class="integration-inline-actions"><?php if($p['status']==='pending'): ?><form method="post"><input type="hidden" name="action" value="check_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Cek Status</button></form><?php endif; ?><form method="post" onsubmit="return confirm('Hapus request ini dari daftar?');"><input type="hidden" name="action" value="dismiss_pairing"><input type="hidden" name="id" value="<?=e($p['id'])?>"><button class="btn">Hapus</button></form></div></td></tr><?php endforeach; if(!$pairings): ?><tr><td colspan="6" class="empty-integration"><strong>Tidak ada request pairing.</strong><br>Semua request yang sudah disetujui otomatis tidak ditampilkan.</td></tr><?php endif; ?></tbody></table></div></div></div>
+
+<div class="integration-modal" id="apiLogModal" role="dialog" aria-modal="true"><div class="integration-modal-box"><div class="integration-modal-head"><h3>API Test / Sync Log</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body table-wrap integration-table"><table><thead><tr><th>Waktu</th><th>Sistem</th><th>Endpoint</th><th>Status</th><th>HTTP</th><th>Respons</th></tr></thead><tbody><?php foreach($logs as $l): $response=(string)($l['response_payload']??($l['message']??'')); ?><tr><td><?=e($l['created_at'])?></td><td><?=e($l['system_key'])?></td><td><?=e($l['endpoint'])?></td><td><span class="badge <?=$l['status']==='success'?'ok':'danger'?>"><?=e($l['status'])?></span></td><td><?=e($l['status_code'])?></td><td><div class="log-detail" title="<?=e($response)?>"><?=e($response!==''?$response:'-')?></div></td></tr><?php endforeach; if(!$logs): ?><tr><td colspan="6" class="empty-integration">Belum ada log API.</td></tr><?php endif; ?></tbody></table></div></div></div>
+
+<div class="integration-modal" id="rulesModal" role="dialog" aria-modal="true"><div class="integration-modal-box"><div class="integration-modal-head"><h3>Aturan Akses Integrasi</h3><button type="button" class="integration-close" data-close-modal>✕</button></div><div class="integration-modal-body"><ul class="scope-note"><li>Back Office ke Adena/Dapur memakai akses admin operasional read/write, bukan owner.</li><li>POS Desktop dan API web lain tidak diubah.</li><li>Token tidak ditampilkan pada halaman.</li><li>Request approved otomatis hilang dari daftar request, tetapi histori tetap tersimpan di database.</li><li>Koneksi lama dapat dinonaktifkan melalui tombol Hapus.</li></ul></div></div></div>
+<script>
+(function(){
+  function closeModal(modal){ if(modal) modal.classList.remove('open'); }
+  document.querySelectorAll('[data-open-modal]').forEach(function(btn){ btn.addEventListener('click',function(){ var el=document.getElementById(btn.getAttribute('data-open-modal')); if(el) el.classList.add('open'); }); });
+  document.querySelectorAll('[data-close-modal]').forEach(function(btn){ btn.addEventListener('click',function(){ closeModal(btn.closest('.integration-modal')); }); });
+  document.querySelectorAll('.integration-modal').forEach(function(modal){ modal.addEventListener('click',function(e){ if(e.target===modal) closeModal(modal); }); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape') document.querySelectorAll('.integration-modal.open').forEach(closeModal); });
+})();
+</script>
