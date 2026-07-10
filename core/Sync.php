@@ -14,6 +14,8 @@ function bo_employee_identity_key(array $row,string $systemKey): string {
 }
 
 function bo_sync_employee_row(array $conn,array $row): void {
+  $roleKey=strtolower(trim((string)($row['role_key'] ?? $row['role'] ?? '')));
+  if($roleKey==='owner') return;
   $systemKey=(string)($conn['system_key'] ?? $conn['system_type'] ?? 'adena');
   $source=(string)($row['source'] ?? $conn['system_type'] ?? 'adena');
   $externalId=(string)($row['employee_id'] ?? $row['id'] ?? $row['username'] ?? '');
@@ -75,23 +77,30 @@ function bo_sync_employees(?array $onlyConn=null): array {
     if(!is_array($rows)) $rows=[];
     $summary['received']+=count($rows);
     foreach($rows as $row){
-      if(is_array($row)){ bo_sync_employee_row($conn,$row); $summary['saved']++; }
+      if(is_array($row)){
+        $roleKey=strtolower(trim((string)($row['role_key'] ?? $row['role'] ?? '')));
+        if($roleKey==='owner') continue;
+        bo_sync_employee_row($conn,$row); $summary['saved']++;
+      }
     }
     try { bo_exec('UPDATE bo_system_connections SET last_sync_at=NOW(),last_sync_status=?,last_sync_message=? WHERE system_key=?',['ok','Pegawai: '.count($rows).' row',$key]); } catch(Throwable $e) {}
   }
   return $summary;
 }
 
-function bo_employee_rows(string $source='all'): array {
+function bo_employee_rows(string $source='all',string $status='active'): array {
   bo_bootstrap_schema();
-  $where=''; $params=[];
-  if($source!=='all'){ $where='WHERE a.source_system=?'; $params[]=$source; }
+  $conditions=["LOWER(TRIM(COALESCE(a.role_key,'')))<>'owner'"]; $params=[];
+  if($source!=='all'){ $conditions[]='a.source_system=?'; $params[]=$source; }
+  if($status==='active') $conditions[]='p.manually_disabled=0';
+  elseif($status==='inactive') $conditions[]='p.manually_disabled=1';
+  $where='WHERE '.implode(' AND ',$conditions);
   $sql="SELECT p.*, GROUP_CONCAT(DISTINCT a.source_system ORDER BY a.source_system SEPARATOR ', ') sources,
       GROUP_CONCAT(DISTINCT CONCAT(COALESCE(NULLIF(a.role_label,''),a.role_key,'Pegawai'),' - ',COALESCE(NULLIF(a.system_name,''),a.system_key)) ORDER BY a.system_name SEPARATOR ' | ') roles_locations,
       GROUP_CONCAT(DISTINCT COALESCE(NULLIF(a.location,''),a.system_name,a.system_key) ORDER BY a.system_name SEPARATOR ', ') locations,
       MAX(a.last_seen_at) assignment_seen_at,
-      SUM(a.activity_count) activity_count,
-      MAX(a.is_active) assignment_active
+      SUM(CASE WHEN p.manually_disabled=0 THEN a.activity_count ELSE 0 END) activity_count,
+      CASE WHEN p.manually_disabled=1 THEN 0 ELSE MAX(a.is_active) END assignment_active
     FROM bo_employee_people p
     JOIN bo_employee_assignments a ON a.person_id=p.id
     {$where}

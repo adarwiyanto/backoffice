@@ -1,72 +1,70 @@
 <?php
 require_once __DIR__.'/../core/Sync.php';
 
-$msg='';
-$err='';
-if($_SERVER['REQUEST_METHOD']==='POST' && ($_POST['action'] ?? '')==='sync_employees'){
-  $res=bo_sync_employees();
-  $message='Sync pegawai selesai. Diterima: '.(int)($res['received'] ?? 0).', disimpan: '.(int)($res['saved'] ?? 0).'.';
-  $type='success';
-  if(empty($res['ok'])){ $type='error'; $message.=' Error: '.implode('; ', $res['errors'] ?? []); }
-  header('Location: ?p=employees&sync_notice='.rawurlencode($message).'&sync_type='.$type); exit;
+function bo_employees_redirect(string $message,string $type='success'): void {
+  $query=[
+    'p'=>'employees',
+    'source'=>(string)($_GET['source'] ?? $_POST['source'] ?? 'all'),
+    'status'=>(string)($_GET['status'] ?? $_POST['status'] ?? 'active'),
+    'sync_notice'=>$message,
+    'sync_type'=>$type,
+  ];
+  header('Location: ?'.http_build_query($query)); exit;
 }
+
+if($_SERVER['REQUEST_METHOD']==='POST'){
+  $action=(string)($_POST['action'] ?? '');
+  try {
+    if($action==='sync_employees'){
+      $res=bo_sync_employees();
+      $message='Sync pegawai selesai. Diterima: '.(int)($res['received'] ?? 0).', disimpan: '.(int)($res['saved'] ?? 0).'.';
+      $type='success';
+      if(empty($res['ok'])){ $type='error'; $message.=' Error: '.implode('; ', $res['errors'] ?? []); }
+      bo_employees_redirect($message,$type);
+    }
+    if($action==='toggle_employee'){
+      $id=(int)($_POST['id'] ?? 0);
+      $person=bo_exec('SELECT id,canonical_name,manually_disabled FROM bo_employee_people WHERE id=? LIMIT 1',[$id])->fetch();
+      if(!$person) bo_employees_redirect('Pegawai tidak ditemukan.','error');
+      $disabled=(int)$person['manually_disabled'] ? 0 : 1;
+      bo_exec('UPDATE bo_employee_people SET manually_disabled=?,updated_at=NOW() WHERE id=?',[$disabled,$id]);
+      bo_employees_redirect(($disabled?'Pegawai dinonaktifkan dan dikeluarkan dari perhitungan.':'Pegawai diaktifkan kembali.'));
+    }
+    bo_employees_redirect('Aksi pegawai tidak dikenali.','error');
+  } catch(Throwable $e){
+    error_log('[BackOffice Employees] action='.$action.' error='.$e->getMessage().' file='.$e->getFile().':'.$e->getLine());
+    bo_employees_redirect('Proses tidak dapat diselesaikan. Detail teknis telah dicatat pada error log.','error');
+  }
+}
+
 $msg=trim((string)($_GET['sync_notice']??''));
 $err=(($_GET['sync_type']??'')==='error')?$msg:'';
 if($err!=='') $msg='';
-
-$src=$_GET['source'] ?? 'all';
-$rows=bo_employee_rows($src);
-if(!$rows){
-  $res=bo_sync_employees();
-  $rows=bo_employee_rows($src);
-  if(!empty($res['received'])){
-    $msg='Pegawai otomatis disinkronkan saat halaman dibuka. Disimpan: '.(int)($res['saved'] ?? 0).'.';
-  }
-  if(empty($res['ok']) && !empty($res['errors'])){
-    $err=implode('; ', $res['errors']);
-  }
-}
-
-$connectionStates=[];
-foreach(['adena','dapur'] as $type){
-  foreach(bo_connections_by_type($type) as $conn){
-    $connectionStates[]=[
-      'name'=>(string)($conn['system_name'] ?? $conn['system_key'] ?? ucfirst($type)),
-      'type'=>$type,
-      'ok'=>(($conn['last_health_status'] ?? '')==='ok'),
-      'health'=>(string)($conn['last_health_status'] ?? 'belum dicek'),
-      'message'=>(string)($conn['last_health_message'] ?? ''),
-      'last_sync'=>(string)($conn['last_sync_at'] ?? ''),
-      'sync_message'=>(string)($conn['last_sync_message'] ?? ''),
-    ];
-  }
-}
+$src=(string)($_GET['source'] ?? 'all');
+$status=(string)($_GET['status'] ?? 'active');
+if(!in_array($src,['all','adena','dapur'],true)) $src='all';
+if(!in_array($status,['active','inactive','all'],true)) $status='active';
+$rows=bo_employee_rows($src,$status);
 ?>
 <style>
-.employee-list.table-wrap{box-shadow:none;border-radius:10px}.employee-list table{min-width:980px}.employee-list th,.employee-list td{padding:6px 8px;font-size:12px;line-height:1.25;vertical-align:middle}.employee-list th{font-size:11px}.employee-list small{font-size:11px}.employee-list .btn{padding:4px 7px;border-radius:7px;font-size:12px}.employee-list .badge{padding:2px 6px;font-size:11px}.employee-name{font-weight:700}.employee-id{color:var(--muted);font-size:11px}.filters.compact-filters{margin-bottom:10px}.filters.compact-filters>*{max-width:190px}.employee-api-states{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.employee-api-state{padding:8px 10px;border:1px solid #e5e7eb;border-radius:9px;background:#fff;font-size:12px}.employee-api-state.failed{border-color:#fecaca;background:#fef2f2}.employee-api-state strong{display:block;margin-bottom:2px}
-</style>
-<div class="page-title"><div><h1>Semua Pegawai</h1><div class="muted">Master pegawai Back Office dari sinkronisasi toko/dapur, dengan deduplikasi berdasarkan email.</div></div><form method="post"><input type="hidden" name="action" value="sync_employees"><button class="btn primary">Sync Pegawai Sekarang</button></form></div>
+.employee-list.table-wrap{box-shadow:none;border-radius:10px}.employee-list table{min-width:980px}.employee-list th,.employee-list td{padding:6px 8px;font-size:12px;line-height:1.25;vertical-align:middle}.employee-list th{font-size:11px}.employee-list small{font-size:11px}.employee-list .btn{padding:4px 7px;border-radius:7px;font-size:12px}.employee-list .badge{padding:2px 6px;font-size:11px}.employee-name{font-weight:700}.employee-id{color:var(--muted);font-size:11px}.filters.compact-filters{margin-bottom:10px}.filters.compact-filters>*{max-width:190px}</style>
+<div class="page-title"><div><h1>Pegawai</h1><div class="muted">Master pegawai toko dan dapur. Role owner tidak ditampilkan dan pegawai nonaktif tidak masuk perhitungan aktivitas.</div></div><form method="post"><input type="hidden" name="action" value="sync_employees"><input type="hidden" name="source" value="<?=e($src)?>"><input type="hidden" name="status" value="<?=e($status)?>"><button class="btn primary">Sync Pegawai Sekarang</button></form></div>
 <?php if($msg): ?><div class="alert"><?=e($msg)?></div><?php endif; ?>
 <?php if($err): ?><div class="alert danger"><?=e($err)?></div><?php endif; ?>
-<div class="employee-api-states">
-<?php foreach($connectionStates as $state): ?>
-  <div class="employee-api-state <?=$state['ok']?'':'failed'?>">
-    <strong><?=e($state['name'])?> — <?=e($state['health'])?></strong>
-    <?php if($state['last_sync']!==''): ?>Sync terakhir: <?=e($state['last_sync'])?><?php else: ?>Belum pernah sync<?php endif; ?>
-    <?php if($state['sync_message']!==''): ?><br><?=e($state['sync_message'])?><?php elseif($state['message']!==''): ?><br><?=e($state['message'])?><?php endif; ?>
-  </div>
-<?php endforeach; ?>
-<?php if(!$connectionStates): ?><div class="employee-api-state failed"><strong>Belum ada koneksi aktif</strong>Hubungkan Adena atau Dapur pada menu Integrasi.</div><?php endif; ?>
-</div>
-<form class="filters compact-filters"><div><label>Sumber</label><select name="source" onchange="this.form.submit()"><option value="all">Semua</option><option value="adena" <?=$src==='adena'?'selected':''?>>Toko / Adena</option><option value="dapur" <?=$src==='dapur'?'selected':''?>>Dapur</option></select><input type="hidden" name="p" value="employees"></div></form>
-<div class="table-wrap employee-list"><table><thead><tr><th>Nama</th><th>Email/HP</th><th>Sumber</th><th>Role & Lokasi</th><th>Status</th><th>Aktivitas</th><th>Terakhir Sync</th></tr></thead><tbody>
-<?php foreach($rows as $r): ?><tr>
+<form class="filters compact-filters" method="get">
+  <input type="hidden" name="p" value="employees">
+  <div><label>Sumber</label><select name="source" onchange="this.form.submit()"><option value="all">Semua</option><option value="adena" <?=$src==='adena'?'selected':''?>>Toko / Adena</option><option value="dapur" <?=$src==='dapur'?'selected':''?>>Dapur</option></select></div>
+  <div><label>Status</label><select name="status" onchange="this.form.submit()"><option value="active" <?=$status==='active'?'selected':''?>>Aktif</option><option value="inactive" <?=$status==='inactive'?'selected':''?>>Nonaktif</option><option value="all" <?=$status==='all'?'selected':''?>>Semua status</option></select></div>
+</form>
+<div class="table-wrap employee-list"><table><thead><tr><th>Nama</th><th>Email/HP</th><th>Sumber</th><th>Role & Lokasi</th><th>Status</th><th>Aktivitas</th><th>Terakhir Sync</th><th>Aksi</th></tr></thead><tbody>
+<?php foreach($rows as $r): $inactive=(int)($r['manually_disabled']??0)===1; ?><tr>
   <td><span class="employee-name"><?=e($r['canonical_name']??'-')?></span><br><span class="employee-id">Master ID: <?=e($r['id']??'-')?></span></td>
   <td><?=e(($r['email'] ?? '') ?: '-')?><br><small><?=e(($r['phone'] ?? '') ?: '')?></small></td>
   <td><span class="badge <?=str_contains((string)($r['sources']??''),'dapur')?'warn':'ok'?>"><?=e(strtoupper((string)($r['sources']??'-')))?></span></td>
   <td><?=e($r['roles_locations']??'-')?><br><small><?=e($r['locations']??'')?></small></td>
-  <td><span class="badge <?=((int)($r['assignment_active']??$r['is_active']??1))?'ok':'danger'?>"><?=((int)($r['assignment_active']??$r['is_active']??1))?'Aktif':'Nonaktif'?></span></td>
+  <td><span class="badge <?=$inactive?'danger':'ok'?>"><?=$inactive?'Nonaktif':'Aktif'?></span></td>
   <td><?=e((int)($r['activity_count']??0))?></td>
   <td><?=e($r['assignment_seen_at']??$r['last_seen_at']??'-')?></td>
-</tr><?php endforeach; if(!$rows): ?><tr><td colspan="7">Data belum tersedia. Pastikan API toko sudah pairing aktif, lalu klik Sync Pegawai Sekarang.</td></tr><?php endif; ?>
+  <td><form method="post"><input type="hidden" name="action" value="toggle_employee"><input type="hidden" name="id" value="<?=e($r['id'])?>"><input type="hidden" name="source" value="<?=e($src)?>"><input type="hidden" name="status" value="<?=e($status)?>"><button class="btn" data-confirm="<?=$inactive?'Aktifkan kembali pegawai ini?':'Nonaktifkan pegawai ini dari perhitungan?'?>"><?=$inactive?'Aktifkan':'Nonaktifkan'?></button></form></td>
+</tr><?php endforeach; if(!$rows): ?><tr><td colspan="8">Tidak ada pegawai pada filter ini. Role owner memang tidak ditampilkan.</td></tr><?php endif; ?>
 </tbody></table></div>
