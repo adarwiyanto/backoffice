@@ -132,7 +132,8 @@ function bo_dash_fetch_summary_payload(array $conn, string $kind): array {
     $payload=bo_dash_payload($res);
     if(is_array($payload) && bo_dash_has_scalar_data($payload)) $merged=bo_dash_deep_merge($merged,$payload);
     if($kind==='adena' && bo_dash_month_amount($merged)>0 && (bo_dash_today_amount($merged,bo_dash_transactions_today($merged))>0 || bo_dash_transactions_today($merged)>0)) break;
-    if($kind==='dapur' && (bo_dash_value($merged,['productions_today','production_today','produksi_hari_ini','today_production_count'])>0 || bo_dash_value($merged,['pending_distributions','distribution_pending','pending_delivery_count','distribusi_pending'])>0)) break;
+    // Endpoint resmi Dapur dapat valid mengembalikan nilai nol. Jangan lanjut menggabungkan endpoint fallback/legacy.
+    if($kind==='dapur' && $endpoint==='api/backoffice/dashboard_summary.php' && is_array($payload) && bo_dash_has_scalar_data($payload)) break;
   }
   return ['ok'=>$ok,'data'=>$merged,'message'=>$ok?'':($errors[0] ?? 'API dashboard gagal'),'_attempts'=>$attempts];
 }
