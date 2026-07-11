@@ -56,6 +56,38 @@ function bo_dash_value(array $data, array $keys): float {
   return $found ? bo_dash_num($found['value']) : 0;
 }
 
+function bo_dash_has_key(array $data, array $keys): bool {
+  return bo_dash_find_key($data,$keys)!==null;
+}
+
+function bo_dash_fetch_employee_count(array $conn): ?int {
+  // Keep the communication contract centralized in Back Office:
+  // base URL, Bearer token, timeout and sync logging all come from ApiClient.
+  $res=bo_api_request_connection($conn,'api/backoffice/employees.php');
+  if(empty($res['ok'])) return null;
+
+  $rows=$res['data'] ?? null;
+  if(!is_array($rows)) return null;
+  if($rows===[]) return 0;
+
+  // Prefer counting the returned employee rows so inactive users and owners
+  // are excluded consistently even when an older store endpoint reports a raw count.
+  if(!bo_dash_is_assoc($rows)){
+    $count=0;
+    foreach($rows as $row){
+      if(!is_array($row)) continue;
+      $active=array_key_exists('is_active',$row) ? (int)$row['is_active']===1 : true;
+      $role=bo_dash_norm_key((string)($row['role_key'] ?? $row['role'] ?? 'pegawai_toko'));
+      if(!$active || in_array($role,['owner','superadmin'],true)) continue;
+      $count++;
+    }
+    return $count;
+  }
+
+  $found=bo_dash_find_key($rows,['employees_count','employee_count','active_employees','pegawai_count','jumlah_pegawai','staff_count','count']);
+  return $found ? max(0,(int)bo_dash_num($found['value'])) : null;
+}
+
 
 function bo_dash_context_value(array $data, array $contexts, array $keys): float {
   $ctx=[];
@@ -274,6 +306,11 @@ function bo_dash_adena_summary(): array {
     if(!empty($res['ok'])) $sum['ok_count']++;
     else $sum['errors'][]=(string)($conn['system_name'] ?? $conn['system_key'] ?? 'Adena').': '.($res['message'] ?? 'API gagal');
     $data=bo_dash_payload($res);
+    $employeeKeys=['employees_count','employee_count','active_employees','pegawai_count','jumlah_pegawai','staff_count'];
+    if(!bo_dash_has_key($data,$employeeKeys)){
+      $fallbackEmployees=bo_dash_fetch_employee_count($conn);
+      if($fallbackEmployees!==null) $data['employees_count']=$fallbackEmployees;
+    }
     $rows=bo_dash_branch_arrays($data);
     if(!$rows) $rows=[$data];
     foreach($rows as $row){
