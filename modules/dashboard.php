@@ -233,6 +233,9 @@ function bo_dash_adena_branch(array $data, array $conn): array {
     'sales_today'=>bo_dash_today_amount($data,$trx),
     'transactions_today'=>$trx,
     'sales_month'=>bo_dash_month_amount($data),
+    'pending_distributions'=>bo_dash_value($data,[
+      'pending_distributions','distribution_pending','pending_distribution','pending_delivery_count','distribusi_pending'
+    ]),
     'active_products'=>bo_dash_value($data,['active_products','products_count','product_count','total_products','produk_aktif','jumlah_produk_aktif']),
     'employees_count'=>bo_dash_value($data,['employees_count','employee_count','active_employees','pegawai_count','jumlah_pegawai','staff_count']),
   ];
@@ -264,7 +267,7 @@ function bo_dash_summary_endpoints(): array {
 }
 
 function bo_dash_adena_summary(): array {
-  $sum=['sales_today'=>0,'transactions_today'=>0,'sales_month'=>0,'active_products'=>0,'employees_count'=>0,'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
+  $sum=['sales_today'=>0,'transactions_today'=>0,'sales_month'=>0,'pending_distributions'=>0,'active_products'=>0,'employees_count'=>0,'ok_count'=>0,'total_count'=>0,'branches'=>[],'errors'=>[]];
   foreach(bo_connections_by_type('adena') as $conn){
     $sum['total_count']++;
     $res=bo_dash_fetch_summary_payload($conn,'adena');
@@ -279,6 +282,7 @@ function bo_dash_adena_summary(): array {
       $sum['sales_today'] += $b['sales_today'];
       $sum['transactions_today'] += $b['transactions_today'];
       $sum['sales_month'] += $b['sales_month'];
+      $sum['pending_distributions'] += $b['pending_distributions'];
       $sum['active_products'] += $b['active_products'];
       $sum['employees_count'] += $b['employees_count'];
     }
@@ -353,7 +357,7 @@ $dp=bo_dash_dapur_summary();
   <div class="card metric"><div class="label">Omset Total Bulan Ini</div><div class="value"><?=money_id($ad['sales_month']??0)?></div><div class="sub">Total toko terkoneksi</div><div class="dash-breakdown"><?=bo_dash_money_lines($ad['branches']??[],'sales_month')?></div></div>
   <div class="card metric"><div class="label">Omset Dapur Bulan Ini</div><div class="value"><?=money_id($dp['kitchen_revenue_month']??0)?></div><div class="sub">Harga jual Dapur aktual</div><div class="dash-breakdown"><?=bo_dash_money_lines($dp['revenue_branches']??[],'kitchen_revenue_month')?></div></div>
   <div class="card metric"><div class="label">Produksi Hari Ini</div><div class="value"><?=e((int)($dp['productions_today']??0))?></div><div class="sub">Posting produksi dapur</div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'productions_today')?></div></div>
-  <div class="card metric"><div class="label">Distribusi Pending</div><div class="value"><?=e((int)($dp['pending_distributions']??0))?></div><div class="sub">Dapur ke toko</div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'pending_distributions')?></div></div>
+  <div class="card metric"><div class="label">Distribusi Pending</div><div class="value"><?=e((int)($ad['pending_distributions']??0))?></div><div class="sub">Belum dikonfirmasi toko</div><div class="dash-breakdown"><?=bo_dash_count_lines($ad['branches']??[],'pending_distributions')?></div></div>
 </div>
 <div class="grid section"><div class="card metric"><div class="label">Produk Toko</div><div class="value"><?=e((int)($ad['active_products']??0))?></div><div class="dash-breakdown"><?=bo_dash_count_lines($ad['branches']??[],'active_products')?></div></div><div class="card metric"><div class="label">Produk Jadi Dapur</div><div class="value"><?=e((int)($dp['active_finished_products']??0))?></div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'active_finished_products')?></div></div><div class="card metric"><div class="label">Pegawai Toko</div><div class="value"><?=e((int)($ad['employees_count']??0))?></div><div class="dash-breakdown"><?=bo_dash_count_lines($ad['branches']??[],'employees_count')?></div></div><div class="card metric"><div class="label">Pegawai Dapur</div><div class="value"><?=e((int)($dp['employees_count']??0))?></div><div class="dash-breakdown"><?=bo_dash_count_lines($dp['branches']??[],'employees_count')?></div></div></div>
 <?php if(!empty($ad['errors']) || !empty($dp['errors'])): ?><div class="card section"><h3>Catatan Sinkron Dashboard</h3><div class="dash-alert"><?php foreach(array_merge($ad['errors']??[],$dp['errors']??[]) as $err): ?><div><?=e($err)?></div><?php endforeach; ?></div></div><?php endif; ?>
