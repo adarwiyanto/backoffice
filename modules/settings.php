@@ -15,6 +15,8 @@ if($_SERVER['REQUEST_METHOD']==='POST'&&$svc){
   elseif($a==='disconnect'){$svc->disconnect();$msg='Koneksi Google Drive diputus.';}
   elseif($a==='download_key'){$site=preg_replace('/[^A-Za-z0-9_-]+/','-',(string)$svc->get('site_code',$svc->appKey()));while(ob_get_level()>0)@ob_end_clean();header('Content-Type: text/plain; charset=utf-8');header('Content-Disposition: attachment; filename="backup-recovery-key-'.$site.'.txt"');echo $svc->recoveryKeyText();backup_safe_finish();exit;}
   elseif($a==='run'){$r=$svc->runBackup((string)($_POST['backup_type']??'daily'),'owner');$msg='Backup berhasil: '.$r['filename'];}
+  elseif($a==='test_restore'){$jobId=(int)($_POST['backup_job_id']??0);if($jobId<=0){$type=(string)($_POST['backup_type']??'daily');$latest=$svc->successfulBackups($type,1);if(!$latest)throw new RuntimeException('Belum ada backup berhasil untuk timeframe yang dipilih. Jalankan Backup Sekarang terlebih dahulu.');$jobId=(int)$latest[0]['id'];}$r=$svc->testRestore($jobId);$msg='Tes Restore lulus: database valid, file aplikasi '.(int)($r['application_files']??0).', private uploads '.(int)($r['private_uploads']??0).'.';}
+  elseif($a==='restore'){$r=$svc->restoreBackup((int)($_POST['backup_job_id']??0),(string)($_POST['restore_confirm']??''));$msg='Restore berhasil. Pre-restore backup: '.($r['pre_restore']??'-');}
  }catch(Throwable $e){$err=backup_safe_capture($backupRoot,'BACKOFFICE backup action',$e);}
 }
 ?><div class="page-title"><div><h1>Setting Backup Google Drive</h1><div class="muted">Backup otomatis terenkripsi untuk Back Office.</div></div></div><?php if($msg):?><div class="alert success"><?=e($msg)?></div><?php endif;?><?php if($err):?><div class="alert danger"><?=e($err)?></div><?php endif;?><?php
