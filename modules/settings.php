@@ -5,7 +5,8 @@ if(session_status()!==PHP_SESSION_ACTIVE) bo_session_start(); if(empty($_SESSION
 $relativeCallback=bo_url('backup_google_callback.php');$scheme=((!empty($_SERVER['HTTPS'])&&$_SERVER['HTTPS']!=='off')||strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO']??''))==='https')?'https':'http';$callback=preg_match('~^https?://~i',$relativeCallback)?$relativeCallback:$scheme.'://'.($_SERVER['HTTP_HOST']??'localhost').'/'.ltrim($relativeCallback,'/');
 if($_SERVER['REQUEST_METHOD']==='POST'){
  try{if(!hash_equals($csrf,(string)($_POST['backup_csrf']??'')))throw new RuntimeException('CSRF token tidak valid.');$a=(string)($_POST['backup_action']??'');
-  if($a==='save_config'){$svc->saveConfiguration($_POST);$msg='Konfigurasi backup berhasil disimpan.';}
+  if($a==='repair'){$svc->repairInfrastructure();$msg='Struktur backup berhasil diperiksa dan diperbaiki.';}
+  elseif($a==='save_config'){$svc->saveConfiguration($_POST);$msg='Konfigurasi backup berhasil disimpan.';}
   elseif($a==='connect'){$state=bin2hex(random_bytes(24));$_SESSION['backup_oauth_state']=$state;header('Location: '.$svc->authorizationUrl($callback,$state));exit;}
   elseif($a==='test'){$r=$svc->testConnection();$msg='Koneksi berhasil ke '.($r['email']??'Google Drive').'.';}
   elseif($a==='disconnect'){$svc->disconnect();$msg='Koneksi Google Drive diputus.';}
