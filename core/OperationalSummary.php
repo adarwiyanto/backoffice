@@ -12,10 +12,10 @@ function bo_ops_unit_name(array $conn,array $data): string {
   $name=(string)bo_ops_first($data,[['system','name'],['store','name'],'store_name','system_name','connection_label'],'');
   return trim($name)!==''?$name:(string)($conn['system_name']??$conn['system_key']??'Koneksi');
 }
-function bo_ops_fetch_summaries(string $type,string $month): array {
+function bo_ops_fetch_summaries(string $type,string $month,array $extra=[]): array {
   $rows=[];
   foreach(bo_connections_by_type($type) as $conn){
-    $res=bo_api_request_connection($conn,'api/backoffice/dashboard_summary.php',['month'=>$month]);
+    $res=bo_api_request_connection($conn,'api/backoffice/dashboard_summary.php',array_merge(['month'=>$month],$extra));
     $data=!empty($res['ok'])?bo_ops_payload($res):[];
     if($type==='adena' && !empty($res['ok'])){
       $hasEmployees=bo_ops_first($data,['employees_count','employee_count','active_employees'],null);

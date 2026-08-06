@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__.'/../core/OperationalSummary.php';
-$month=$_GET['month']??date('Y-m');if(!preg_match('/^\d{4}-\d{2}$/',$month))$month=date('Y-m');
-$stores=bo_ops_fetch_summaries('adena',$month);$kitchens=bo_ops_fetch_summaries('dapur',$month);
+$month=$_GET['month']??date('Y-m');if(!preg_match('/^\d{4}-\d{2}$/',$month))$month=date('Y-m');$customStart=$_GET['start_date']??date('Y-m-d');$customEnd=$_GET['end_date']??date('Y-m-d');if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$customStart))$customStart=date('Y-m-d');if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$customEnd))$customEnd=date('Y-m-d');if($customEnd<$customStart){$tmp=$customStart;$customStart=$customEnd;$customEnd=$tmp;}
+$stores=bo_ops_fetch_summaries('adena',$month,['start_date'=>$customStart,'end_date'=>$customEnd]);$kitchens=bo_ops_fetch_summaries('dapur',$month,['start_date'=>$customStart,'end_date'=>$customEnd]);
 $boExpenseTotal=0.0;$boPaymentPending=0.0;$monthStart=$month.'-01';$monthEnd=date('Y-m-d',strtotime($monthStart.' +1 month'));
 try{$st=bo_exec('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=\'bo_expenses\'');if((int)$st->fetchColumn()>0){$st=bo_exec("SELECT COALESCE(SUM(amount),0) FROM bo_expenses WHERE expense_date>=? AND expense_date<? AND status IN ('approved','paid') AND deleted_at IS NULL",[$monthStart,$monthEnd]);$boExpenseTotal=(float)$st->fetchColumn();}}catch(Throwable $e){}
 try{$st=bo_exec('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=\'bo_payment_requests\'');if((int)$st->fetchColumn()>0){$st=bo_exec("SELECT COALESCE(SUM(amount),0) FROM bo_payment_requests WHERE request_date>=? AND request_date<? AND status IN ('draft','submitted','approved') AND deleted_at IS NULL",[$monthStart,$monthEnd]);$boPaymentPending=(float)$st->fetchColumn();}}catch(Throwable $e){}
@@ -11,8 +11,14 @@ function bo_dash_card(string $title,string $value,string $sub=''): string { retu
 function bo_dash_store_metrics(array $u): array {
  $d=$u['data'];return [
   'sales_today'=>bo_dash_metric($d,['revenue_today','omset_today',['today','revenue']]),
+  'sales_yesterday'=>bo_dash_metric($d,['revenue_yesterday','omset_yesterday',['yesterday','revenue']]),
+  'sales_two_days_ago'=>bo_dash_metric($d,['revenue_two_days_ago','omset_two_days_ago',['two_days_ago','revenue']]),
+  'sales_custom'=>bo_dash_metric($d,['revenue_custom','omset_custom',['custom','revenue']]),
   'sales_month'=>bo_dash_metric($d,['revenue_month','omset_month','omset_bulan_ini',['month','revenue']]),
   'transactions_today'=>bo_dash_metric($d,['transactions_today',['today','transactions']]),
+  'transactions_yesterday'=>bo_dash_metric($d,['transactions_yesterday',['yesterday','transactions']]),
+  'transactions_two_days_ago'=>bo_dash_metric($d,['transactions_two_days_ago',['two_days_ago','transactions']]),
+  'transactions_custom'=>bo_dash_metric($d,['transactions_custom',['custom','transactions']]),
   'products'=>bo_dash_metric($d,['active_products','products']),
   'employees'=>bo_dash_metric($d,['employees_count','employee_count']),
   'prod_batches'=>bo_dash_metric($d,[['production','batches_today'],'productions_today']),
@@ -39,6 +45,12 @@ function bo_dash_kitchen_metrics(array $u): array {
   'dist_received'=>bo_dash_metric($d,[['distribution','received']]),
   'dist_returned'=>bo_dash_metric($d,[['distribution','cancelled']]),
   'dist_failed'=>bo_dash_metric($d,[['distribution','failed']]),
+  'sales_today'=>bo_dash_metric($d,['kitchen_revenue_today',['sales_today','revenue']]),
+  'sales_yesterday'=>bo_dash_metric($d,['kitchen_revenue_yesterday',['sales_yesterday','revenue']]),
+  'sales_two_days_ago'=>bo_dash_metric($d,['kitchen_revenue_two_days_ago',['sales_two_days_ago','revenue']]),
+  'sales_custom'=>bo_dash_metric($d,['kitchen_revenue_custom',['sales_custom','revenue']]),
+  'sales_month'=>bo_dash_metric($d,['kitchen_revenue_month','dapur_omset_month']),
+  'direct_month'=>bo_dash_metric($d,[['sales_month','direct_revenue']]),
   'distribution_value'=>bo_dash_metric($d,['kitchen_revenue_month','dapur_omset_month']),
   'kpi_points'=>bo_dash_metric($d,[['kpi','total_points']]),
   'kpi_avg'=>bo_dash_metric($d,[['kpi','average_points']]),
@@ -49,9 +61,10 @@ function bo_dash_kitchen_metrics(array $u): array {
 $storeRows=[];$kitchenRows=[];$errors=[];
 foreach($stores as $u){if(!$u['ok']){$errors[]=$u['name'].': '.$u['message'];continue;}$storeRows[]=['name'=>$u['name'],'m'=>bo_dash_store_metrics($u)];}
 foreach($kitchens as $u){if(!$u['ok']){$errors[]=$u['name'].': '.$u['message'];continue;}$kitchenRows[]=['name'=>$u['name'],'m'=>bo_dash_kitchen_metrics($u)];}
-$tot=['sales_today'=>0,'sales_month'=>0,'transactions_today'=>0,'store_employees'=>0,'kitchen_employees'=>0,'store_prod_batches'=>0,'store_prod_qty'=>0,'kitchen_prod_batches'=>0,'kitchen_prod_qty'=>0,'dist_pending'=>0,'dist_received'=>0,'dist_returned'=>0,'dist_failed'=>0,'store_purchases'=>0,'store_expenses'=>0,'kitchen_purchases'=>0,'kitchen_expenses'=>0,'store_profit'=>0,'store_kpi_assessed'=>0,'store_kpi_unassessed'=>0,'store_kpi_weighted'=>0,'kpi_store_employee_base'=>0,'kitchen_points'=>0];
-foreach($storeRows as $r){$m=$r['m'];foreach(['sales_today','sales_month','transactions_today'] as $k)$tot[$k]+=$m[$k];$tot['store_employees']+=$m['employees'];$tot['store_prod_batches']+=$m['prod_batches'];$tot['store_prod_qty']+=$m['prod_qty'];$tot['dist_pending']+=$m['dist_pending'];$tot['dist_received']+=$m['dist_received'];$tot['dist_returned']+=$m['dist_returned'];$tot['dist_failed']+=$m['dist_failed'];$tot['store_purchases']+=$m['purchases'];$tot['store_expenses']+=$m['expenses'];$tot['store_profit']+=$m['profit'];$tot['store_kpi_assessed']+=$m['kpi_assessed'];$tot['store_kpi_unassessed']+=$m['kpi_unassessed'];$tot['store_kpi_weighted']+=$m['kpi_avg']*$m['kpi_assessed'];$tot['kpi_store_employee_base']+=$m['kpi_assessed'];}
+$tot=['sales_today'=>0,'sales_yesterday'=>0,'sales_two_days_ago'=>0,'sales_custom'=>0,'sales_month'=>0,'transactions_today'=>0,'transactions_yesterday'=>0,'transactions_two_days_ago'=>0,'transactions_custom'=>0,'store_employees'=>0,'kitchen_employees'=>0,'store_prod_batches'=>0,'store_prod_qty'=>0,'kitchen_prod_batches'=>0,'kitchen_prod_qty'=>0,'dist_pending'=>0,'dist_received'=>0,'dist_returned'=>0,'dist_failed'=>0,'store_purchases'=>0,'store_expenses'=>0,'kitchen_purchases'=>0,'kitchen_expenses'=>0,'store_profit'=>0,'store_kpi_assessed'=>0,'store_kpi_unassessed'=>0,'store_kpi_weighted'=>0,'kpi_store_employee_base'=>0,'kitchen_points'=>0];
+foreach($storeRows as $r){$m=$r['m'];foreach(['sales_today','sales_yesterday','sales_two_days_ago','sales_custom','sales_month','transactions_today','transactions_yesterday','transactions_two_days_ago','transactions_custom'] as $k)$tot[$k]+=$m[$k];$tot['store_employees']+=$m['employees'];$tot['store_prod_batches']+=$m['prod_batches'];$tot['store_prod_qty']+=$m['prod_qty'];$tot['dist_pending']+=$m['dist_pending'];$tot['dist_received']+=$m['dist_received'];$tot['dist_returned']+=$m['dist_returned'];$tot['dist_failed']+=$m['dist_failed'];$tot['store_purchases']+=$m['purchases'];$tot['store_expenses']+=$m['expenses'];$tot['store_profit']+=$m['profit'];$tot['store_kpi_assessed']+=$m['kpi_assessed'];$tot['store_kpi_unassessed']+=$m['kpi_unassessed'];$tot['store_kpi_weighted']+=$m['kpi_avg']*$m['kpi_assessed'];$tot['kpi_store_employee_base']+=$m['kpi_assessed'];}
 foreach($kitchenRows as $r){$m=$r['m'];$tot['kitchen_employees']+=$m['employees'];$tot['kitchen_prod_batches']+=$m['prod_batches'];$tot['kitchen_prod_qty']+=$m['prod_qty'];$tot['dist_pending']+=$m['dist_pending'];$tot['dist_received']+=$m['dist_received'];$tot['dist_returned']+=$m['dist_returned'];$tot['dist_failed']+=$m['dist_failed'];$tot['kitchen_purchases']+=$m['purchases'];$tot['kitchen_expenses']+=$m['expenses'];$tot['kitchen_points']+=$m['kpi_points'];}
+$kitchenSales=['today'=>array_sum(array_map(static fn($r)=>(float)$r['m']['sales_today'],$kitchenRows)),'yesterday'=>array_sum(array_map(static fn($r)=>(float)$r['m']['sales_yesterday'],$kitchenRows)),'two_days_ago'=>array_sum(array_map(static fn($r)=>(float)$r['m']['sales_two_days_ago'],$kitchenRows)),'custom'=>array_sum(array_map(static fn($r)=>(float)$r['m']['sales_custom'],$kitchenRows)),'month'=>array_sum(array_map(static fn($r)=>(float)$r['m']['sales_month'],$kitchenRows))];
 $storeDistPending=array_sum(array_map(static fn($r)=>(float)$r['m']['dist_pending'],$storeRows));
 $storeDistReceived=array_sum(array_map(static fn($r)=>(float)$r['m']['dist_received'],$storeRows));
 $storeDistReturned=array_sum(array_map(static fn($r)=>(float)$r['m']['dist_returned'],$storeRows));
@@ -67,11 +80,17 @@ $estimatedGroupProfit=$tot['sales_month']-$tot['store_purchases']-$tot['kitchen_
 </style>
 <div class="page-title"><div><h1>Dashboard</h1><div class="muted">Ringkasan per cabang toko, dapur, KPI, produksi, distribusi, dan keuangan.</div></div><form class="filters" method="get"><input type="hidden" name="p" value="dashboard"><div><label>Periode</label><input type="month" name="month" value="<?=e($month)?>"></div><div><button class="btn primary">Tampilkan</button></div></form></div>
 
-<section class="dashboard-section"><div class="section-head"><h2>Omset Toko</h2><a class="btn" href="?p=sales">Lihat Penjualan</a></div><div class="grid">
+<section class="dashboard-section"><div class="section-head"><h2>Omset Toko</h2><a class="btn" href="?p=sales&start_date=<?=e($customStart)?>&end_date=<?=e($customEnd)?>">Lihat Penjualan</a></div>
+<form class="filters card" method="get"><input type="hidden" name="p" value="dashboard"><input type="hidden" name="month" value="<?=e($month)?>"><div><label>Custom dari</label><input type="date" name="start_date" value="<?=e($customStart)?>"></div><div><label>Sampai</label><input type="date" name="end_date" value="<?=e($customEnd)?>"></div><div><button class="btn primary">Terapkan Custom</button></div></form><div class="grid section">
 <?=bo_dash_card('Omset Hari Ini',money_id($tot['sales_today']),number_format((int)$tot['transactions_today'],0,',','.').' transaksi')?>
-<?=bo_dash_card('Omset Bulan Ini',money_id($tot['sales_month']),'Gabungan seluruh host toko')?>
-<?=bo_dash_card('Jumlah Toko Aktif',e(count($storeRows)),'Koneksi API terbaca')?>
-</div><div class="unit-grid section"><?php foreach($storeRows as $r): ?><div class="card unit-card"><h3><?=e($r['name'])?></h3><div class="unit-stat"><span>Omset hari ini</span><strong><?=money_id($r['m']['sales_today'])?></strong></div><div class="unit-stat"><span>Transaksi hari ini</span><strong><?=e((int)$r['m']['transactions_today'])?></strong></div><div class="unit-stat"><span>Omset bulan ini</span><strong><?=money_id($r['m']['sales_month'])?></strong></div></div><?php endforeach; if(!$storeRows): ?><div class="card">Belum ada toko aktif yang dapat dibaca.</div><?php endif; ?></div></section>
+<?=bo_dash_card('Omset Kemarin',money_id($tot['sales_yesterday']),number_format((int)$tot['transactions_yesterday'],0,',','.').' transaksi')?>
+<?=bo_dash_card('Omset 2 Hari Lalu',money_id($tot['sales_two_days_ago']),number_format((int)$tot['transactions_two_days_ago'],0,',','.').' transaksi')?>
+<?=bo_dash_card('Omset Bulan Ini',money_id($tot['sales_month']),'Gabungan seluruh toko')?>
+<?=bo_dash_card('Omset Custom',money_id($tot['sales_custom']),$customStart.' s.d. '.$customEnd)?>
+</div><div class="unit-grid section"><?php foreach($storeRows as $r): ?><div class="card unit-card"><h3><?=e($r['name'])?></h3><div class="unit-stat"><span>Omset hari ini</span><strong><?=money_id($r['m']['sales_today'])?></strong></div><div class="unit-stat"><span>Transaksi hari ini</span><strong><?=e((int)$r['m']['transactions_today'])?></strong></div><div class="unit-stat"><span>Omset kemarin</span><strong><?=money_id($r['m']['sales_yesterday'])?></strong></div><div class="unit-stat"><span>Omset 2 hari lalu</span><strong><?=money_id($r['m']['sales_two_days_ago'])?></strong></div><div class="unit-stat"><span>Omset bulan ini</span><strong><?=money_id($r['m']['sales_month'])?></strong></div><div class="unit-stat"><span>Omset custom</span><strong><?=money_id($r['m']['sales_custom'])?></strong></div></div><?php endforeach; if(!$storeRows): ?><div class="card">Belum ada toko aktif yang dapat dibaca.</div><?php endif; ?></div></section>
+<section class="dashboard-section"><div class="section-head"><h2>Omset Dapur</h2><a class="btn" href="?p=sales&source=dapur&start_date=<?=e($customStart)?>&end_date=<?=e($customEnd)?>">Lihat Penjualan Dapur</a></div><div class="grid">
+<?=bo_dash_card('Omset Dapur Hari Ini',money_id($kitchenSales['today']))?><?=bo_dash_card('Omset Dapur Kemarin',money_id($kitchenSales['yesterday']))?><?=bo_dash_card('Omset Dapur 2 Hari Lalu',money_id($kitchenSales['two_days_ago']))?><?=bo_dash_card('Omset Dapur Bulan Ini',money_id($kitchenSales['month']))?><?=bo_dash_card('Omset Dapur Custom',money_id($kitchenSales['custom']),$customStart.' s.d. '.$customEnd)?>
+</div><div class="unit-grid section"><?php foreach($kitchenRows as $r): ?><div class="card unit-card"><h3><?=e($r['name'])?></h3><div class="unit-stat"><span>Hari ini</span><strong><?=money_id($r['m']['sales_today'])?></strong></div><div class="unit-stat"><span>Kemarin</span><strong><?=money_id($r['m']['sales_yesterday'])?></strong></div><div class="unit-stat"><span>2 hari lalu</span><strong><?=money_id($r['m']['sales_two_days_ago'])?></strong></div><div class="unit-stat"><span>Bulan ini</span><strong><?=money_id($r['m']['sales_month'])?></strong></div><div class="unit-stat"><span>Custom</span><strong><?=money_id($r['m']['sales_custom'])?></strong></div></div><?php endforeach; ?></div></section>
 
 <section class="dashboard-section"><div class="section-head"><h2>Produksi</h2><a class="btn" href="?p=production">Detail Produksi</a></div><div class="grid">
 <?=bo_dash_card('Batch Produksi Toko Hari Ini',e((int)$tot['store_prod_batches']),number_format($tot['store_prod_qty'],2,',','.').' qty')?>
