@@ -14,6 +14,8 @@ function bo_db(): PDO {
   $c = bo_config()['db'];
   $dsn = "mysql:host={$c['host']};port={$c['port']};dbname={$c['name']};charset={$c['charset']}";
   $pdo = new PDO($dsn, $c['user'], $c['pass'], [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
+  // Samakan NOW(), CURDATE(), CURRENT_TIMESTAMP dan konversi TIMESTAMP MySQL dengan WIB.
+  $pdo->exec("SET time_zone = '+07:00'");
   return $pdo;
 }
 function bo_exec(string $sql, array $p=[]): PDOStatement { $st=bo_db()->prepare($sql); $st->execute($p); return $st; }

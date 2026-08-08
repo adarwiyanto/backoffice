@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Asia/Jakarta');
 $lockFile = __DIR__ . '/../storage/install.lock';
 
 function bo_install_lock_exists($lockFile) {
@@ -44,6 +45,7 @@ if ($step === 'install') {
 
   try{
     $pdo=new PDO("mysql:host=$host;port=$port;charset=utf8mb4",$user,$pass,[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+    $pdo->exec("SET time_zone = '+07:00'");
     $pdo->exec("CREATE DATABASE IF NOT EXISTS `$name` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     $pdo->exec("USE `$name`");
 
