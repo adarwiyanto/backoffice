@@ -1,4 +1,4 @@
-<?php $u=bo_user(); $kpiType=$_GET['type']??''; $finView=$_GET['view']??''; ?>
+<?php $u=bo_user(); $kpiSection=$_GET['section']??'overview'; $finView=$_GET['view']??''; ?>
 <aside class="sidebar" id="sidebar"><div class="sb-top"><div class="profile-card"><div class="avatar">BO</div><div class="p-text"><div class="p-title">Back Office</div><div class="p-sub"><?=e($u['role_key']??'viewer')?></div></div></div></div><nav class="nav">
 <div class="group-label">Utama</div>
 <a class="<?=active_page('dashboard')?>" href="?p=dashboard"><span class="mi">⌂</span><span class="label">Dashboard</span></a>
@@ -9,7 +9,16 @@
 <a class="<?=active_page('sales')?>" href="?p=sales"><span class="mi">₹</span><span class="label">Penjualan</span></a>
 <div class="group-label">SDM</div>
 <a class="<?=active_page('employees')?>" href="?p=employees"><span class="mi">👥</span><span class="label">Pegawai</span></a>
-<details class="nav-sub" <?=($_GET['p']??'')==='kpi'?'open':''?>><summary><span class="mi">◎</span><span class="label">KPI Pegawai</span></summary><a class="<?=($_GET['p']??'')==='kpi'&&$kpiType==='store'?'active':''?>" href="?p=kpi&type=store"><span class="mi">↳</span><span class="label">KPI Pegawai Toko</span></a><a class="<?=($_GET['p']??'')==='kpi'&&$kpiType==='dapur'?'active':''?>" href="?p=kpi&type=dapur"><span class="mi">↳</span><span class="label">KPI Pegawai Dapur</span></a></details>
+<details class="nav-sub" <?=($_GET['p']??'')==='kpi'?'open':''?>><summary><span class="mi">◎</span><span class="label">KPI Pegawai</span></summary>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='overview'?'active':''?>" href="?p=kpi&section=overview"><span class="mi">↳</span><span class="label">Ringkasan KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='store_master'?'active':''?>" href="?p=kpi&section=store_master"><span class="mi">↳</span><span class="label">Toko · Master KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='store_input'?'active':''?>" href="?p=kpi&section=store_input"><span class="mi">↳</span><span class="label">Toko · Input KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='store_recap'?'active':''?>" href="?p=kpi&section=store_recap"><span class="mi">↳</span><span class="label">Toko · Rekap KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='dapur'?'active':''?>" href="?p=kpi&section=dapur"><span class="mi">↳</span><span class="label">Dapur · Sinkron KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='backoffice_master'?'active':''?>" href="?p=kpi&section=backoffice_master"><span class="mi">↳</span><span class="label">Back Office · Master KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='backoffice_input'?'active':''?>" href="?p=kpi&section=backoffice_input"><span class="mi">↳</span><span class="label">Back Office · Input KPI</span></a>
+<a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='backoffice_recap'?'active':''?>" href="?p=kpi&section=backoffice_recap"><span class="mi">↳</span><span class="label">Back Office · Rekap KPI</span></a>
+</details>
 <div class="group-label">Keuangan</div>
 <details class="nav-sub" <?=($_GET['p']??'')==='finance'?'open':''?>><summary><span class="mi">◫</span><span class="label">Keuangan</span></summary>
 <?php foreach(['summary'=>'Ringkasan','purchases'=>'Pembelian','expenses'=>'Pengeluaran','payments'=>'Permintaan Pembayaran','payroll'=>'Penggajian','profit'=>'Laba Rugi','cashflow'=>'Arus Kas'] as $key=>$label): ?><a class="<?=($_GET['p']??'')==='finance'&&$finView===$key?'active':''?>" href="?p=finance&view=<?=$key?>"><span class="mi">↳</span><span class="label"><?=e($label)?></span></a><?php endforeach; ?>
