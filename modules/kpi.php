@@ -17,8 +17,21 @@ function bo_kpi_weight_total(string $scope): float {$st=bo_exec('SELECT COALESCE
 function bo_kpi_store_employees(): array {return bo_exec("SELECT a.id assignment_id,a.person_id,a.system_key,a.system_name,a.external_employee_id,a.role_key,p.canonical_name FROM bo_employee_assignments a JOIN bo_employee_people p ON p.id=a.person_id WHERE a.is_active=1 AND p.is_active=1 AND p.manually_disabled=0 AND LOWER(TRIM(COALESCE(a.source_system,'')))<>'dapur' AND LOWER(TRIM(COALESCE(a.role_key,''))) NOT IN ('owner','superadmin') ORDER BY a.system_name,p.canonical_name")->fetchAll()?:[];}
 function bo_kpi_admin_employees(): array {return bo_exec("SELECT id bo_user_id,name,username,role_key FROM bo_users WHERE is_active=1 AND LOWER(TRIM(role_key))='admin' ORDER BY name")->fetchAll()?:[];}
 function bo_kpi_find_assessment(string $scope,string $month,int $assignmentId,int $boUserId): ?array {$sql='SELECT * FROM bo_kpi_assessments WHERE scope_key=? AND assessment_month=? AND '.($scope==='store'?'assignment_id=?':'bo_user_id=?').' LIMIT 1';$r=bo_exec($sql,[$scope,$month,$scope==='store'?$assignmentId:$boUserId])->fetch();return $r?:null;}
+function bo_kpi_sync_master_items(int $assessmentId,string $scope): int {
+ $a=bo_exec('SELECT status FROM bo_kpi_assessments WHERE id=? AND scope_key=? LIMIT 1',[$assessmentId,$scope])->fetch();
+ if(!$a||($a['status']??'')==='final')return 0;
+ $inserted=0;
+ foreach(bo_kpi_master_rows($scope,true) as $m){
+  $exists=(int)bo_exec('SELECT COUNT(*) FROM bo_kpi_assessment_items WHERE assessment_id=? AND master_id=?',[$assessmentId,(int)$m['id']])->fetchColumn();
+  if($exists>0)continue;
+  bo_exec('INSERT INTO bo_kpi_assessment_items(assessment_id,master_id,kpi_name_snapshot,category_snapshot,weight_snapshot,max_score_snapshot,score,weighted_score,notes) VALUES(?,?,?,?,?,?,0,0,\'\')',[$assessmentId,(int)$m['id'],$m['kpi_name'],$m['category_name'],$m['weight'],$m['max_score']]);
+  $inserted++;
+ }
+ if($inserted>0)bo_kpi_recalc($assessmentId);
+ return $inserted;
+}
 function bo_kpi_build_assessment(string $scope,string $month,int $assignmentId,int $boUserId,int $uid): int {
- $a=bo_kpi_find_assessment($scope,$month,$assignmentId,$boUserId);if($a)return (int)$a['id'];
+ $a=bo_kpi_find_assessment($scope,$month,$assignmentId,$boUserId);if($a){bo_kpi_sync_master_items((int)$a['id'],$scope);return (int)$a['id'];}
  $systemKey='backoffice';$systemName='Back Office';
  if($scope==='store'){$r=bo_exec('SELECT system_key,system_name FROM bo_employee_assignments WHERE id=? LIMIT 1',[$assignmentId])->fetch();if(!$r)throw new RuntimeException('Pegawai toko tidak ditemukan.');$systemKey=(string)$r['system_key'];$systemName=(string)$r['system_name'];}
  bo_exec('INSERT INTO bo_kpi_assessments(scope_key,assessment_month,assignment_id,bo_user_id,system_key,system_name,status,final_score,total_weight,created_by,created_at) VALUES(?,?,?,?,?,?,\'draft\',0,0,?,NOW())',[$scope,$month,$scope==='store'?$assignmentId:null,$scope==='backoffice'?$boUserId:null,$systemKey,$systemName,$uid]);
@@ -69,7 +82,7 @@ $csrf=bo_kpi_csrf();
 
 <?php elseif(in_array($section,['store_input','backoffice_input'],true)): $scope=bo_kpi_scope_from_section($section);$emps=$scope==='store'?bo_kpi_store_employees():bo_kpi_admin_employees(); ?>
 <div class="card"><div class="section-head"><div><h3>Input KPI <?=e($scope==='store'?'Toko':'Back Office')?></h3><div class="muted">KPI hanya menjadi dasar pembobotan insentif payroll.</div></div><form class="filters"><input type="hidden" name="p" value="kpi"><input type="hidden" name="section" value="<?=e($section)?>"><label>Bulan<input type="month" name="month" value="<?=e($month)?>"></label><button class="btn primary">Tampilkan</button></form></div></div>
-<?php foreach($emps as $emp): $assignmentId=(int)($emp['assignment_id']??0);$boUserId=(int)($emp['bo_user_id']??0);$a=$schemaReady?bo_kpi_find_assessment($scope,$month,$assignmentId,$boUserId):null;$items=$a?bo_exec('SELECT * FROM bo_kpi_assessment_items WHERE assessment_id=? ORDER BY id',[(int)$a['id']])->fetchAll():[];$locked=$a&&($a['status']==='final'); ?>
+<?php foreach($emps as $emp): $assignmentId=(int)($emp['assignment_id']??0);$boUserId=(int)($emp['bo_user_id']??0);$a=$schemaReady?bo_kpi_find_assessment($scope,$month,$assignmentId,$boUserId):null;if($a&&($a['status']??'')!=='final')bo_kpi_sync_master_items((int)$a['id'],$scope);$items=$a?bo_exec('SELECT * FROM bo_kpi_assessment_items WHERE assessment_id=? ORDER BY id',[(int)$a['id']])->fetchAll():[];$locked=$a&&($a['status']==='final'); ?>
 <details class="card kpi-employee" <?=isset($_GET['employee'])&&((string)$_GET['employee']===(string)($scope==='store'?$assignmentId:$boUserId))?'open':''?>><summary><?=e($scope==='store'?$emp['canonical_name']:$emp['name'])?> <span class="muted">— <?=e($scope==='store'?$emp['system_name']:'Back Office')?> · <?=e($emp['role_key']??'admin')?></span> <span class="badge <?=$locked?'ok':'warn'?>"><?=e(strtoupper((string)($a['status']??'belum dinilai')))?></span></summary>
 <div class="section"><div class="kpi-meta"><span>Nilai akhir: <b><?=e(number_format((float)($a['final_score']??0),2,',','.'))?></b></span><span>Total bobot snapshot: <?=e(number_format((float)($a['total_weight']??0),2,',','.'))?>%</span></div>
 <?php if(!$a&&$schemaReady): ?><form method="post"><input type="hidden" name="csrf" value="<?=e($csrf)?>"><input type="hidden" name="action" value="save_assessment"><input type="hidden" name="scope" value="<?=e($scope)?>"><input type="hidden" name="assignment_id" value="<?=$assignmentId?>"><input type="hidden" name="bo_user_id" value="<?=$boUserId?>"><button class="btn primary">Mulai Penilaian</button></form>
