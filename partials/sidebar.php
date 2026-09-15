@@ -9,6 +9,7 @@
 <a class="<?=active_page('sales')?>" href="?p=sales"><span class="mi">₹</span><span class="label">Penjualan</span></a>
 <div class="group-label">SDM</div>
 <a class="<?=active_page('employees')?>" href="?p=employees"><span class="mi">👥</span><span class="label">Pegawai</span></a>
+<a class="<?=active_page('attendance')?>" href="?p=attendance&scope=store"><span class="mi">✓</span><span class="label">Absensi</span></a>
 <details class="nav-sub" <?=($_GET['p']??'')==='kpi'?'open':''?>><summary><span class="mi">◎</span><span class="label">KPI Pegawai</span></summary>
 <a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='overview'?'active':''?>" href="?p=kpi&section=overview"><span class="mi">↳</span><span class="label">Ringkasan KPI</span></a>
 <a class="<?=($_GET['p']??'')==='kpi'&&$kpiSection==='store_master'?'active':''?>" href="?p=kpi&section=store_master"><span class="mi">↳</span><span class="label">Toko · Master KPI</span></a>
