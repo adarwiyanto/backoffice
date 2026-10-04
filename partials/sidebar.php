@@ -26,9 +26,9 @@
 <?php if(in_array(strtolower((string)($u['role_key']??'')),['owner','admin'],true)): ?><a class="<?=($_GET['p']??'')==='finance'&&$finView==='settings'?'active':''?>" href="?p=finance&view=settings"><span class="mi">↳</span><span class="label">Setting Jenis</span></a><?php endif; ?>
 </details>
 <div class="group-label">Sistem</div>
-<details class="nav-sub" <?=in_array(($_GET['p']??''),['integration','settings'],true)?'open':''?>><summary><span class="mi">⚙</span><span class="label">Setting System</span></summary>
+<details class="nav-sub" <?=in_array(($_GET['p']??''),['integration','settings','branding'],true)?'open':''?>><summary><span class="mi">⚙</span><span class="label">Setting System</span></summary>
 <a class="<?=active_page('integration')?>" href="?p=integration"><span class="mi">↳</span><span class="label">API &amp; Integrasi</span></a>
 <a class="<?=active_page('integration')?>" href="?p=integration"><span class="mi">↳</span><span class="label">Pairing Back Office</span></a>
 <a class="<?=active_page('production')?>" href="?p=production"><span class="mi">↳</span><span class="label">Setting Produksi/Inventory</span></a>
-<?php if(($u['role_key']??'')==='owner'): ?><a class="<?=active_page('settings')?>" href="?p=settings"><span class="mi">↳</span><span class="label">Setting Backup Google Drive</span></a><?php endif; ?>
+<?php if(($u['role_key']??'')==='owner'): ?><a class="<?=active_page('branding')?>" href="?p=branding"><span class="mi">↳</span><span class="label">Branding Perusahaan</span></a><a class="<?=active_page('settings')?>" href="?p=settings"><span class="mi">↳</span><span class="label">Setting Backup Google Drive</span></a><?php endif; ?>
 </details><?php if(in_array($u['role_key']??'', ['owner','admin'], true)): ?><a class="<?=active_page('users')?>" href="?p=users"><span class="mi">◉</span><span class="label">Admin User</span></a><?php endif; ?></nav></aside>

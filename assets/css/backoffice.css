@@ -9,3 +9,21 @@
 
 /* Payroll compact dialogs - 2026-10-04 */
 .payroll-dialog{width:min(920px,94vw);max-height:90vh;border:0;border-radius:16px;padding:0;box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:auto}.payroll-dialog::backdrop{background:rgba(15,23,42,.48)}.payroll-dialog form{padding:18px}.dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px}.dialog-head b{font-size:18px}.dialog-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dialog-grid section{border:1px solid var(--border);border-radius:12px;padding:12px;background:#fbfdff}.dialog-grid h4{margin:0 0 8px}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}@media(max-width:760px){.dialog-grid{grid-template-columns:1fr}.payroll-dialog{width:96vw}}
+
+/* Patch 20261004: company branding page */
+.branding-card{max-width:900px}.branding-help{font-size:12px;margin-top:6px}.branding-preview-wrap{margin-top:18px}.branding-preview-title{font-size:12px;color:#475569;margin-bottom:7px}.branding-preview{min-height:92px;border:1px dashed #cbd5e1;border-radius:12px;background:#f8fafc;display:flex;align-items:center;justify-content:center;padding:14px}.branding-preview img{display:block;max-height:90px;max-width:280px;object-fit:contain}.branding-empty{color:var(--muted);font-size:13px;text-align:center}.branding-actions{display:flex;gap:8px;margin-top:16px}.branding-remove-form{margin-top:8px}
+
+/* Patch 20261004: mobile sidebar. Burger remains the control and follows the right edge of the open sidebar. */
+.sidebar-overlay{display:none}
+@media(max-width:960px){
+  :root{--mobile-sidebar-w:min(82vw,300px)}
+  .sidebar{width:var(--mobile-sidebar-w);left:calc(-1 * var(--mobile-sidebar-w));z-index:40;box-shadow:12px 0 28px rgba(15,23,42,.18)}
+  .sidebar.open{left:0}
+  .sidebar-overlay{display:block;position:fixed;inset:0;background:rgba(15,23,42,.28);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,visibility .18s ease;z-index:30}
+  body.sidebar-open .sidebar-overlay{opacity:1;visibility:visible;pointer-events:auto}
+  body.sidebar-open{overflow:hidden}
+  .hamb{display:inline-flex;position:fixed;left:12px;top:9px;z-index:50;width:42px;height:40px;align-items:center;justify-content:center;transition:left .18s ease,transform .18s ease;box-shadow:0 5px 14px rgba(0,0,0,.16)}
+  body.sidebar-open .hamb{left:var(--mobile-sidebar-w);transform:translateX(-50%)}
+  .topbar{padding-left:70px}
+}
+@media(max-width:620px){.branding-grid{grid-template-columns:1fr}.branding-preview img{max-width:220px}}
