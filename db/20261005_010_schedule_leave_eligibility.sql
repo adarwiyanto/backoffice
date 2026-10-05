@@ -43,5 +43,5 @@ ALTER TABLE bo_payroll_items
 UPDATE bo_payroll_employee_period_settings
 SET leave_days=0, leave_manual_deduction=0, leave_deduction_mode='auto';
 
-INSERT IGNORE INTO bo_schema_migrations(migration_key,applied_at)
+INSERT IGNORE INTO bo_schema_migrations(migration,applied_at)
 VALUES ('20261005_schedule_leave_eligibility',NOW());
